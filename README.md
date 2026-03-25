@@ -156,6 +156,29 @@ session.addToolCalls([
 | `result` | `string \| ContentBlock[]` | Tool output |
 | `isError` | `boolean?` | Whether the tool call errored |
 
+#### `session.importMessages(messages): void`
+
+Bulk import an array of Anthropic API-shaped messages. Dispatches each to the right internal method based on role and content type. Useful when replaying API responses or syncing from another provider.
+
+```typescript
+session.importMessages([
+  { role: 'user', content: 'Read the config file' },
+  { role: 'assistant', content: [
+    { type: 'tool_use', id: 'toolu_abc', name: 'Read', input: { file_path: '/config.json' } },
+  ]},
+  { role: 'user', content: [
+    { type: 'tool_result', tool_use_id: 'toolu_abc', content: '{"port": 3000}' },
+  ]},
+  { role: 'assistant', content: [{ type: 'text', text: 'The config sets port to 3000.' }] },
+]);
+```
+
+Dispatch rules:
+- `assistant` → `addAssistantMessage()` (string content wrapped in a text block)
+- `user` string → `addUserMessage()`
+- `user` array with `tool_result` blocks → `addToolResults()`
+- `user` array with only `text` blocks → `addUserMessage()` (text joined with newlines)
+
 #### `session.save(): void`
 
 Writes all pending records to disk. Creates the JSONL file and parent directories if needed. Appends if the file already exists.

@@ -191,6 +191,77 @@ describe('openSession + append', () => {
   });
 });
 
+describe('importMessages', () => {
+  test('dispatches user text, assistant, and tool_result messages', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu_real_123', name: 'Read', input: { file_path: '/foo' } },
+      ]},
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_real_123', content: 'file contents' },
+      ]},
+      { role: 'assistant', content: [{ type: 'text', text: 'I read the file.' }] },
+    ]);
+    session.save();
+
+    const msgs = session.messages;
+    expect(msgs).toHaveLength(5);
+    expect(msgs[0].type).toBe('user');
+    expect((msgs[0] as UserRecord).message.content).toBe('hello');
+    expect(msgs[1].type).toBe('assistant');
+    expect(msgs[2].type).toBe('assistant'); // tool_use
+    expect((msgs[2] as AssistantRecord).message.stop_reason).toBe('tool_use');
+    expect(msgs[3].type).toBe('user'); // tool_result
+    expect(msgs[4].type).toBe('assistant');
+  });
+
+  test('preserves tool_use IDs from input', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu_original_id', name: 'Bash', input: { command: 'ls' } },
+      ]},
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_original_id', content: 'output' },
+      ]},
+    ]);
+
+    const asst = session.messages[0] as AssistantRecord;
+    const toolUse = asst.message.content[0];
+    expect(toolUse.type).toBe('tool_use');
+    expect((toolUse as any).id).toBe('toolu_original_id');
+
+    const user = session.messages[1] as UserRecord;
+    const toolResult = (user.message.content as any[])[0];
+    expect(toolResult.tool_use_id).toBe('toolu_original_id');
+  });
+
+  test('handles assistant string content', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'assistant', content: 'plain text response' },
+    ]);
+
+    const asst = session.messages[0] as AssistantRecord;
+    expect(asst.message.content).toEqual([{ type: 'text', text: 'plain text response' }]);
+  });
+});
+
 describe('readSession', () => {
   test('reads fixture file preserving all record types', () => {
     const fixturePath = join(import.meta.dirname, 'fixtures', 'sample.jsonl');

@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath } from './paths.js';
 import type {
-  JsonlRecord, UserRecord, AssistantRecord, ContentBlock,
+  JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
 } from './types.js';
 
@@ -211,6 +211,43 @@ export class Session {
 
     if (opts?.response) {
       this.addAssistantMessage(opts.response, { model: opts?.model });
+    }
+  }
+
+  /**
+   * Import an array of Anthropic API-shaped messages, dispatching each to the
+   * appropriate internal method based on role and content type.
+   */
+  importMessages(messages: { role: 'user' | 'assistant'; content: string | ContentBlock[] }[]): void {
+    for (const msg of messages) {
+      if (msg.role === 'assistant') {
+        const content = typeof msg.content === 'string'
+          ? [{ type: 'text' as const, text: msg.content }]
+          : msg.content;
+        this.addAssistantMessage(content);
+      } else {
+        if (typeof msg.content === 'string') {
+          this.addUserMessage(msg.content);
+        } else {
+          const toolResults = msg.content.filter(
+            (b): b is ToolResultBlock => b.type === 'tool_result',
+          );
+          if (toolResults.length > 0) {
+            this.addToolResults(toolResults.map(r => ({
+              toolUseId: r.tool_use_id,
+              content: r.content,
+              isError: r.is_error,
+            })));
+          } else {
+            // User message with non-tool content blocks — extract text
+            const text = msg.content
+              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+              .map(b => b.text)
+              .join('\n');
+            this.addUserMessage(text || JSON.stringify(msg.content));
+          }
+        }
+      }
     }
   }
 
