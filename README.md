@@ -14,17 +14,36 @@ Requires Node >= 20.
 
 ## Quick Start
 
-```typescript
-import { createSession, openSession } from 'cc-session-io';
+### Create a new session
 
-// Create a session and add a conversation
+```typescript
+import { createSession } from 'cc-session-io';
+
 const session = createSession({ projectPath: '/path/to/project' });
 session.addUserMessage('Refactor the auth module');
 session.addAssistantMessage([{ type: 'text', text: 'I will refactor the auth module.' }]);
 session.save();
 
-// Resume it in Claude Code
-// $ claude --resume <session.sessionId>
+// Resume it: claude --resume <session.sessionId>
+```
+
+### Append to an existing session
+
+```typescript
+import { openSession } from 'cc-session-io';
+
+const session = openSession({
+  sessionId: 'existing-uuid-here',
+  projectPath: '/path/to/project',
+});
+
+// Existing messages are available
+console.log(`${session.messages.length} messages loaded`);
+
+// Append new messages — they chain onto the last existing record
+session.addUserMessage('One more thing...');
+session.addAssistantMessage([{ type: 'text', text: 'Sure, what is it?' }]);
+session.save(); // appends to the existing JSONL file
 ```
 
 ## API
@@ -74,7 +93,7 @@ Adds a user text message. Returns the record's UUID.
 
 #### `session.addAssistantMessage(content, opts?): string`
 
-Adds an assistant message with the given content blocks. Returns the record's UUID.
+Adds an assistant message with the given content blocks. Returns the record's UUID. Content blocks are written as-is — any `tool_use` blocks you provide keep their original `id` values. (This matters when replaying real API responses; `addToolCalls()` generates IDs for you, but `addAssistantMessage()` does not.)
 
 ```typescript
 session.addAssistantMessage([{ type: 'text', text: 'Hello!' }]);
@@ -83,6 +102,11 @@ session.addAssistantMessage(
   [{ type: 'text', text: 'Done.' }],
   { model: 'claude-opus-4-6' },
 );
+
+// Pass through real tool_use blocks with their original IDs
+session.addAssistantMessage([
+  { type: 'tool_use', id: 'toolu_01ABC...', name: 'Read', input: { file_path: '/foo' } },
+]);
 ```
 
 | Option | Type | Default |
@@ -92,9 +116,10 @@ session.addAssistantMessage(
 
 #### `session.addToolResults(results): string`
 
-Adds a user message containing tool results. For manual tool use construction.
+Adds a user message containing tool results. Each `toolUseId` must match the `id` of a `tool_use` block from the preceding assistant message — this is how Claude Code pairs requests with responses.
 
 ```typescript
+// After an assistant message with tool_use blocks:
 session.addToolResults([
   { toolUseId: 'toolu_abc', content: 'file contents here' },
   { toolUseId: 'toolu_def', content: 'command output', isError: true },
@@ -156,13 +181,33 @@ getSessionPath('uuid-here', '/Users/me/project');
 // => '/Users/me/.claude/projects/-Users-me-project/uuid-here.jsonl'
 ```
 
+## Content Block Format
+
+All content blocks use the **Anthropic API format**. If you're coming from another agent framework, note the naming:
+
+| This library (Anthropic API) | Other conventions |
+|------------------------------|-------------------|
+| `tool_use` | `toolCall`, `function_call` |
+| `tool_result` | `toolResult`, `function_response` |
+| `tool_use_id` | `toolCallId` |
+| `stop_reason: "tool_use"` | `finish_reason: "function_call"` |
+
 ## How It Works
 
 Claude Code stores sessions as JSONL files in `~/.claude/projects/-<path-hash>/`. Each line is a JSON record. User and assistant messages form a linked list via `uuid`/`parentUuid` fields.
 
 This library writes JSONL files that match the real Claude Code format. On resume, Claude Code replays the stored messages to rebuild context. No SQLite database or session index is required — the JSONL file alone is sufficient.
 
-See [`docs/claude-code-sessions.md`](docs/claude-code-sessions.md) for detailed format documentation and research findings.
+### Minimum viable record
+
+The library writes full-fidelity records with all fields, but Claude Code only requires these for resume:
+
+```jsonl
+{"type":"user","uuid":"<uuid>","parentUuid":null,"sessionId":"<uuid>","timestamp":"<ISO 8601>","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"<uuid>","parentUuid":"<user-uuid>","sessionId":"<uuid>","timestamp":"<ISO 8601>","message":{"id":"msg_...","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}
+```
+
+Everything else (`cwd`, `version`, `isSidechain`, `slug`, `entrypoint`, `gitBranch`, `userType`) is optional. See [`docs/claude-code-sessions.md`](docs/claude-code-sessions.md) for full format documentation and research findings.
 
 ## Testing
 
