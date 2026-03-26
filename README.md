@@ -1,8 +1,10 @@
 # cc-session-io
 
-Read, write, and create Claude Code session files. Zero runtime dependencies.
+Read, write, and create Claude Code session files.
 
-Create synthetic sessions that work with `claude --resume`, or read/append to existing ones. Useful for importing conversation history from other coding agents into Claude Code.
+Can create new session history files or read/write existing ones that will work with `/resume` in Claude Code. Useful for importing conversation history from another coding agent to continue it with `claude`.
+
+No runtime dependencies. No affiliated or supported by Anthropic, the makers of Claude Code.
 
 ## Install
 
@@ -11,6 +13,27 @@ npm install cc-session-io
 ```
 
 Requires Node >= 20.
+
+## Simple CLI Demo
+
+```bash
+# Create new session
+cc-session create -p /my/project
+
+# Add messages to session
+cc-session add user "Hello!" -p /my/project -s <id>
+cc-session add assistant "Hi, how can I help?" -p /my/project -s <id>
+
+# Read conversation
+cc-session read -p /my/project -s <id>
+
+# List sessions
+cc-session list -p /my/project
+```
+
+Options:
+- `-p <path>` - Project path (required)
+- `-s <id>` - Session ID (required for add/read)
 
 ## Quick Start
 
