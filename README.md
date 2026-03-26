@@ -4,7 +4,7 @@ Read, write, and create Claude Code session files.
 
 Can create new session history files or read/write existing ones that will work with `/resume` in Claude Code. Useful for importing conversation history from another coding agent to continue it with `claude`.
 
-No runtime dependencies. No affiliated or supported by Anthropic, the makers of Claude Code.
+No runtime dependencies. Not affiliated or supported by Anthropic, the makers of Claude Code.
 
 ## Install
 
