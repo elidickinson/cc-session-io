@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { openSession, createSession, Session } from './index.js';
+import { openSession, createSession } from './index.js';
+import {
+  getProjectDir as getProjectDirPath,
+  getSessionPath as getSessionPathFull,
+} from './paths.js';
 import { readdirSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -12,15 +16,6 @@ function resolvePath(path: string): string {
     path = join(homedir(), path.slice(1));
   }
   return resolve(path);
-}
-
-function getProjectDir(projectPath: string): string {
-  const hash = resolvePath(projectPath).replaceAll('/', '-');
-  return join(homedir(), '.claude', 'projects', hash);
-}
-
-function getSessionPath(sessionId: string, projectPath: string): string {
-  return join(getProjectDir(projectPath), `${sessionId}.jsonl`);
 }
 
 function help() {
@@ -128,12 +123,7 @@ function main() {
           session = openSession({ sessionId: options.sessionId, projectPath });
         } catch {
           // Session doesn't exist yet, create with the specified ID
-          const jsonlPath = getSessionPath(options.sessionId, projectPath);
-          session = new Session({
-            sessionId: options.sessionId,
-            projectPath,
-            jsonlPath,
-          });
+          session = createSession({ sessionId: options.sessionId, projectPath });
         }
 
         if (type === 'user') {
@@ -165,7 +155,7 @@ function main() {
 
       case 'list': {
         const projectPath = getProject(options);
-        const dir = getProjectDir(projectPath);
+        const dir = getProjectDirPath(projectPath);
 
         try {
           const files = readdirSync(dir).filter(f => f.endsWith('.jsonl'));

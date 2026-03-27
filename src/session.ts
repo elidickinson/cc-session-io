@@ -276,7 +276,7 @@ export class Session {
 
 /** Create a new empty session. */
 export function createSession(opts: CreateSessionOptions): Session {
-  const sessionId = randomUUID();
+  const sessionId = opts.sessionId ?? randomUUID();
   const jsonlPath = getSessionPath(sessionId, opts.projectPath, opts.claudeDir);
   return new Session({
     sessionId,

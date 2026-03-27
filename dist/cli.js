@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import {
-  Session,
   createSession,
+  getProjectDir,
   openSession
-} from "./chunk-A5JSQXWG.js";
+} from "./chunk-IWDJMURK.js";
 
 // src/cli.ts
 import { readdirSync } from "fs";
@@ -15,13 +15,6 @@ function resolvePath(path) {
     path = join(homedir(), path.slice(1));
   }
   return resolve(path);
-}
-function getProjectDir(projectPath) {
-  const hash = resolvePath(projectPath).replaceAll("/", "-");
-  return join(homedir(), ".claude", "projects", hash);
-}
-function getSessionPath(sessionId, projectPath) {
-  return join(getProjectDir(projectPath), `${sessionId}.jsonl`);
 }
 function help() {
   console.log(`
@@ -120,12 +113,7 @@ function main() {
         try {
           session = openSession({ sessionId: options.sessionId, projectPath });
         } catch {
-          const jsonlPath = getSessionPath(options.sessionId, projectPath);
-          session = new Session({
-            sessionId: options.sessionId,
-            projectPath,
-            jsonlPath
-          });
+          session = createSession({ sessionId: options.sessionId, projectPath });
         }
         if (type === "user") {
           session.addUserMessage(message);

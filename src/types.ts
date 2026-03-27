@@ -104,6 +104,7 @@ export interface CreateSessionOptions {
   gitBranch?: string;
   version?: string;
   model?: string;
+  sessionId?: string;
 }
 
 export interface OpenSessionOptions {

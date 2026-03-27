@@ -80,6 +80,7 @@ interface CreateSessionOptions {
     gitBranch?: string;
     version?: string;
     model?: string;
+    sessionId?: string;
 }
 interface OpenSessionOptions {
     sessionId: string;
