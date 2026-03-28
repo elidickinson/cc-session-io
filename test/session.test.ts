@@ -53,6 +53,24 @@ describe('createSession + save', () => {
     expect(msgs[2].parentUuid).toBe(msgs[1].uuid);
   });
 
+  test('records have distinct monotonically increasing timestamps', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.addUserMessage('first');
+    session.addAssistantMessage([{ type: 'text', text: 'response' }]);
+    session.addUserMessage('second');
+    session.addAssistantMessage([{ type: 'text', text: 'response 2' }]);
+    session.save();
+
+    const timestamps = session.messages.map(m => m.timestamp);
+    for (let i = 1; i < timestamps.length; i++) {
+      expect(timestamps[i] > timestamps[i - 1]).toBe(true);
+    }
+  });
+
   test('all fidelity fields are populated', () => {
     const session = createSession({
       projectPath: '/tmp/test-project',
