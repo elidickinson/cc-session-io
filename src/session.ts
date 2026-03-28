@@ -57,6 +57,7 @@ export class Session {
   private _gitBranch: string;
   private _model: string;
   private _fileExists: boolean;
+  private _nextTimestamp: number;
 
   constructor(opts: {
     sessionId: string;
@@ -80,6 +81,7 @@ export class Session {
     this._model = opts.model ?? 'claude-sonnet-4-6';
     this._records = opts.records ?? [];
     this._fileExists = opts.fileExists ?? false;
+    this._nextTimestamp = Date.now();
 
     // Find the last uuid in the chain for appending
     for (let i = this._records.length - 1; i >= 0; i--) {
@@ -109,7 +111,7 @@ export class Session {
       uuid,
       parentUuid: this._lastUuid,
       sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this._nextTimestamp++).toISOString(),
       isSidechain: false,
       cwd: this._cwd,
       userType: 'external',

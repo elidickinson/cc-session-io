@@ -101,6 +101,7 @@ declare class Session {
     private _gitBranch;
     private _model;
     private _fileExists;
+    private _nextTimestamp;
     constructor(opts: {
         sessionId: string;
         projectPath: string;

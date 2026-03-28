@@ -3,7 +3,7 @@ import {
   createSession,
   getProjectDir,
   openSession
-} from "./chunk-IWDJMURK.js";
+} from "./chunk-I5HJ6FJC.js";
 
 // src/cli.ts
 import { readdirSync } from "fs";
