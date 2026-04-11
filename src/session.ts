@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
@@ -253,6 +253,19 @@ export class Session {
     }
   }
 
+  /**
+   * Reset this session to empty state and delete any on-disk artifacts.
+   * The sessionId and jsonlPath are preserved so subsequent writes reuse them.
+   */
+  clear(): void {
+    this._records = [];
+    this._pendingRecords = [];
+    this._lastUuid = null;
+    this._nextTimestamp = Date.now();
+    this._fileExists = false;
+    removeSessionFiles(this.jsonlPath);
+  }
+
   /** Write pending records to disk. Creates the file/directory if needed. */
   save(): void {
     if (this._pendingRecords.length === 0) return;
@@ -274,6 +287,29 @@ export class Session {
     this._records.push(...this._pendingRecords);
     this._pendingRecords = [];
   }
+}
+
+/**
+ * Delete a session's JSONL file and its companion directory (which CC v2.1.x
+ * uses for subagents/ and tool-results/). Safe to call when nothing exists.
+ */
+function removeSessionFiles(jsonlPath: string): void {
+  rmSync(jsonlPath, { force: true });
+  const companionDir = jsonlPath.endsWith('.jsonl')
+    ? jsonlPath.slice(0, -'.jsonl'.length)
+    : jsonlPath;
+  rmSync(companionDir, { recursive: true, force: true });
+}
+
+/** Delete a session by ID without needing an open Session instance. */
+export function deleteSession(
+  sessionId: string,
+  projectPath: string,
+  claudeDir?: string,
+): void {
+  const normalized = normalizeProjectPath(projectPath);
+  const jsonlPath = getSessionPath(sessionId, normalized, claudeDir);
+  removeSessionFiles(jsonlPath);
 }
 
 /** Create a new empty session. */

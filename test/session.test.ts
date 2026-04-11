@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, rmSync, readFileSync, realpathSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createSession, openSession, readSession } from '../src/session.js';
+import { createSession, openSession, readSession, deleteSession } from '../src/session.js';
 import { getProjectDir } from '../src/paths.js';
 import { parseJsonl } from '../src/jsonl.js';
 import type { UserRecord, AssistantRecord } from '../src/types.js';
@@ -289,6 +289,92 @@ describe('readSession', () => {
     expect(session.sessionId).toBe('80f30bff-caa9-43bf-b831-61f1232e2876');
     expect(session.records).toHaveLength(5);
     expect(session.messages).toHaveLength(2);
+  });
+});
+
+describe('Session.clear', () => {
+  test('wipes records and deletes on-disk file', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.addUserMessage('old');
+    session.addAssistantMessage([{ type: 'text', text: 'stale' }]);
+    session.save();
+
+    expect(existsSync(session.jsonlPath)).toBe(true);
+
+    session.clear();
+
+    expect(session.records).toHaveLength(0);
+    expect(session.messages).toHaveLength(0);
+    expect(existsSync(session.jsonlPath)).toBe(false);
+  });
+
+  test('also removes companion directory', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+    session.addUserMessage('hi');
+    session.save();
+
+    const companionDir = session.jsonlPath.replace(/\.jsonl$/, '');
+    mkdirSync(join(companionDir, 'subagents'), { recursive: true });
+
+    session.clear();
+
+    expect(existsSync(companionDir)).toBe(false);
+  });
+
+  test('save after clear writes a fresh file, not appended', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    const originalId = session.sessionId;
+    session.addUserMessage('first old');
+    session.addUserMessage('second old');
+    session.save();
+
+    session.clear();
+    session.addUserMessage('only new');
+    session.save();
+
+    expect(session.sessionId).toBe(originalId);
+
+    const content = readFileSync(session.jsonlPath, 'utf-8');
+    const records = parseJsonl(content);
+    expect(records).toHaveLength(1);
+    expect((records[0] as UserRecord).message.content).toBe('only new');
+    expect((records[0] as UserRecord).parentUuid).toBeNull();
+  });
+});
+
+describe('deleteSession', () => {
+  test('removes the .jsonl and companion directory', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+    session.addUserMessage('hi');
+    session.save();
+
+    const companionDir = session.jsonlPath.replace(/\.jsonl$/, '');
+    mkdirSync(join(companionDir, 'tool-results'), { recursive: true });
+
+    deleteSession(session.sessionId, '/tmp/test-project', tempDir);
+
+    expect(existsSync(session.jsonlPath)).toBe(false);
+    expect(existsSync(companionDir)).toBe(false);
+  });
+
+  test('is a no-op when the session file does not exist', () => {
+    expect(() =>
+      deleteSession('00000000-0000-0000-0000-000000000000', '/tmp/test-project', tempDir),
+    ).not.toThrow();
   });
 });
 
