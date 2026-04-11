@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,28 @@ import { join } from 'node:path';
 export const MAX_SANITIZED_LENGTH = 200;
 
 export function getClaudeDir(claudeDir?: string): string {
-  return claudeDir ?? join(homedir(), '.claude');
+  return claudeDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+}
+
+/**
+ * Normalize a project path the same way Claude Code does at startup:
+ * resolve symlinks via `realpathSync`, then NFC-normalize. This is critical
+ * because CC stores sessions under `~/.claude/projects/<sanitized-realpath>/`,
+ * so any caller that passes an unresolved path (e.g. `process.cwd()` from a
+ * shell that entered via a symlink) writes to a different directory than CC
+ * reads from. On macOS this hits often: `/tmp` → `/private/tmp`, `/var` →
+ * `/private/var`, plus user-level symlinked project dirs.
+ *
+ * Falls back to NFC-normalizing the raw path if `realpathSync` throws (e.g.
+ * the path doesn't exist yet, or EPERM on CloudStorage mounts) — matches CC's
+ * own try/catch behavior in src/bootstrap/state.ts.
+ */
+export function normalizeProjectPath(projectPath: string): string {
+  try {
+    return realpathSync(projectPath).normalize('NFC');
+  } catch {
+    return projectPath.normalize('NFC');
+  }
 }
 
 /**
@@ -26,7 +48,7 @@ export function projectPathToHash(projectPath: string): string {
 
 /** Get the project-specific directory under ~/.claude/projects/ */
 export function getProjectDir(projectPath: string, claudeDir?: string): string {
-  return join(getClaudeDir(claudeDir), 'projects', projectPathToHash(projectPath));
+  return join(getClaudeDir(claudeDir), 'projects', projectPathToHash(normalizeProjectPath(projectPath)));
 }
 
 /** Get the JSONL file path for a session. */
@@ -54,7 +76,8 @@ export function getProjectsDir(claudeDir?: string): string {
  * @returns The actual project directory path, or undefined if not found
  */
 export async function findProjectDir(projectPath: string, claudeDir?: string): Promise<string | undefined> {
-  const exact = getProjectDir(projectPath, claudeDir);
+  const normalized = normalizeProjectPath(projectPath);
+  const exact = getProjectDir(normalized, claudeDir);
   try {
     // Check if exact match exists (lightweight stat vs readdir)
     await stat(exact);
@@ -62,7 +85,7 @@ export async function findProjectDir(projectPath: string, claudeDir?: string): P
   } catch {
     // Exact match failed — for short paths this means no sessions exist.
     // For long paths, try prefix matching to handle hash mismatches.
-    const rawSanitized = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
+    const rawSanitized = normalized.replace(/[^a-zA-Z0-9]/g, '-');
     if (rawSanitized.length <= MAX_SANITIZED_LENGTH) {
       return undefined; // Short path: no hash involved, exact match is required
     }

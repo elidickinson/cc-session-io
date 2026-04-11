@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, rmSync, readFileSync, realpathSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createSession, openSession, readSession } from '../src/session.js';
+import { getProjectDir } from '../src/paths.js';
 import { parseJsonl } from '../src/jsonl.js';
 import type { UserRecord, AssistantRecord } from '../src/types.js';
 
@@ -288,5 +289,56 @@ describe('readSession', () => {
     expect(session.sessionId).toBe('80f30bff-caa9-43bf-b831-61f1232e2876');
     expect(session.records).toHaveLength(5);
     expect(session.messages).toHaveLength(2);
+  });
+});
+
+describe('createSession path normalization', () => {
+  // Regression test for the symlink bug: when a caller passes a project path
+  // that goes through a symlink (e.g. process.cwd() of a shell that entered
+  // via a symlinked dir), cc-session must write the session file under the
+  // *realpath*-resolved hash dir — that's where Claude Code itself looks on
+  // resume (its bootstrap calls realpathSync on the cwd before computing the
+  // project hash). Without normalization, pi writes to one dir and CC SDK
+  // reads from another, producing "No conversation found with session ID".
+  let tempRoot: string;
+  let claudeDir: string;
+
+  beforeEach(() => {
+    tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cc-session-symlink-')));
+    claudeDir = join(tempRoot, 'claude');
+  });
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  test('jsonlPath uses realpath of symlinked project dir', () => {
+    const target = join(tempRoot, 'real-project');
+    const link = join(tempRoot, 'link-project');
+    mkdirSync(target);
+    symlinkSync(target, link);
+
+    const session = createSession({ projectPath: link, claudeDir });
+    session.addUserMessage('hello');
+    session.save();
+
+    // Where CC SDK would look for this session given the *target* cwd:
+    const expectedDir = getProjectDir(target, claudeDir);
+    expect(session.jsonlPath.startsWith(expectedDir + '/')).toBe(true);
+    expect(existsSync(session.jsonlPath)).toBe(true);
+  });
+
+  test('stored cwd field is the realpath, not the symlink', () => {
+    const target = join(tempRoot, 'real-project-2');
+    const link = join(tempRoot, 'link-project-2');
+    mkdirSync(target);
+    symlinkSync(target, link);
+
+    const session = createSession({ projectPath: link, claudeDir });
+    session.addUserMessage('hello');
+    session.save();
+
+    const user = session.messages[0] as UserRecord;
+    expect(user.cwd).toBe(target);
   });
 });

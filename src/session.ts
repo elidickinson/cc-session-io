@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseJsonlFile, serializeRecord } from './jsonl.js';
-import { getSessionPath } from './paths.js';
+import { getSessionPath, normalizeProjectPath } from './paths.js';
 import type {
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
@@ -279,12 +279,16 @@ export class Session {
 /** Create a new empty session. */
 export function createSession(opts: CreateSessionOptions): Session {
   const sessionId = opts.sessionId ?? randomUUID();
-  const jsonlPath = getSessionPath(sessionId, opts.projectPath, opts.claudeDir);
+  // Normalize once: realpath + NFC, matching CC's own bootstrap behavior.
+  // Used for both the on-disk hash directory AND the per-record `cwd` field
+  // so resumed sessions read back consistently with CC's runtime state.
+  const projectPath = normalizeProjectPath(opts.projectPath);
+  const jsonlPath = getSessionPath(sessionId, projectPath, opts.claudeDir);
   return new Session({
     sessionId,
-    projectPath: opts.projectPath,
+    projectPath,
     jsonlPath,
-    cwd: opts.cwd,
+    cwd: opts.cwd ? normalizeProjectPath(opts.cwd) : projectPath,
     version: opts.version,
     gitBranch: opts.gitBranch,
     model: opts.model,
@@ -293,8 +297,9 @@ export function createSession(opts: CreateSessionOptions): Session {
 
 /** Open an existing session by ID. */
 export function openSession(opts: OpenSessionOptions): Session {
-  const jsonlPath = getSessionPath(opts.sessionId, opts.projectPath, opts.claudeDir);
-  return readSession(jsonlPath, opts.projectPath);
+  const projectPath = normalizeProjectPath(opts.projectPath);
+  const jsonlPath = getSessionPath(opts.sessionId, projectPath, opts.claudeDir);
+  return readSession(jsonlPath, projectPath);
 }
 
 /** Read a session from a JSONL file path. */
