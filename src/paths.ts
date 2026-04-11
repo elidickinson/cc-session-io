@@ -1,6 +1,9 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
+
+/** Maximum length for path component before hash suffix is added. */
+export const MAX_SANITIZED_LENGTH = 200;
 
 export function getClaudeDir(claudeDir?: string): string {
   return claudeDir ?? join(homedir(), '.claude');
@@ -12,14 +15,13 @@ export function getClaudeDir(claudeDir?: string): string {
  * and truncate long paths with a hash suffix.
  */
 export function projectPathToHash(projectPath: string): string {
-  const MAX_LENGTH = 200;
   const sanitized = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
-  if (sanitized.length <= MAX_LENGTH) return sanitized;
-  // Simple hash matching the CLI's Java-style hashCode (djb2 variant)
+  if (sanitized.length <= MAX_SANITIZED_LENGTH) return sanitized;
+  // djb2 hash algorithm (matches Claude Code's Node.js implementation)
   let h = 0;
   for (let i = 0; i < projectPath.length; i++)
     h = ((h << 5) - h + projectPath.charCodeAt(i)) | 0;
-  return `${sanitized.slice(0, MAX_LENGTH)}-${Math.abs(h).toString(36)}`;
+  return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${Math.abs(h).toString(36)}`;
 }
 
 /** Get the project-specific directory under ~/.claude/projects/ */
@@ -54,17 +56,17 @@ export function getProjectsDir(claudeDir?: string): string {
 export async function findProjectDir(projectPath: string, claudeDir?: string): Promise<string | undefined> {
   const exact = getProjectDir(projectPath, claudeDir);
   try {
-    // Check if exact match exists
-    await readdir(exact);
+    // Check if exact match exists (lightweight stat vs readdir)
+    await stat(exact);
     return exact;
   } catch {
     // Exact match failed — for short paths this means no sessions exist.
     // For long paths, try prefix matching to handle hash mismatches.
-    const sanitized = projectPathToHash(projectPath);
-    if (sanitized.length <= 200) {
+    const rawSanitized = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
+    if (rawSanitized.length <= MAX_SANITIZED_LENGTH) {
       return undefined; // Short path: no hash involved, exact match is required
     }
-    const prefix = sanitized.slice(0, 200);
+    const prefix = rawSanitized.slice(0, MAX_SANITIZED_LENGTH);
     const projectsDir = getProjectsDir(claudeDir);
     try {
       const entries = await readdir(projectsDir, { withFileTypes: true });
@@ -100,7 +102,7 @@ export async function resolveSessionPath(
   const filePath = join(projectDir, `${sessionId}.jsonl`);
   // Verify file exists
   try {
-    await readdir(projectDir); // Re-use readdir as existence check
+    await stat(filePath);
     return filePath;
   } catch {
     return undefined;
