@@ -206,6 +206,28 @@ Dispatch rules:
 
 Writes all pending records to disk. Creates the JSONL file and parent directories if needed. Appends if the file already exists.
 
+### Session reuse and cleanup
+
+#### `session.clear(): void`
+
+Resets an open `Session` to empty state so the same `sessionId` can be reused with fresh contents. Wipes in-memory records, deletes the on-disk `.jsonl` file, and removes the companion directory (Claude Code v2.1.x writes `subagents/` and `tool-results/` there). After `clear()`, the next `save()` writes a fresh file rather than appending.
+
+```typescript
+session.clear();
+session.addUserMessage('Start over');
+session.save(); // writes a new file at the original jsonlPath
+```
+
+#### `deleteSession(sessionId, projectPath, claudeDir?): void`
+
+Standalone export that deletes a session's `.jsonl` file and companion directory without needing to open it first. No-op if the file doesn't exist.
+
+```typescript
+import { deleteSession } from 'cc-session-io';
+
+deleteSession('uuid-here', '/path/to/project');
+```
+
 ### Low-level JSONL utilities
 
 ```typescript
@@ -243,6 +265,26 @@ All content blocks use the **Anthropic API format**. If you're coming from anoth
 Claude Code stores sessions as JSONL files in `~/.claude/projects/-<path-hash>/`. Each line is a JSON record. User and assistant messages form a linked list via `uuid`/`parentUuid` fields.
 
 This library writes JSONL files that match the real Claude Code format. On resume, Claude Code replays the stored messages to rebuild context. No SQLite database or session index is required — the JSONL file alone is sufficient.
+
+### Path resolution
+
+To place session files where Claude Code will actually find them, this library:
+
+- Resolves `projectPath` via `realpathSync` + NFC normalization before hashing. Claude Code does the same in its bootstrap, so a caller passing `process.cwd()` from a shell that entered via a symlinked directory (common on macOS: `/tmp`, `/var`, user-symlinked project dirs) still writes to the symlink target's hash dir, matching where Claude Code reads from on resume. Falls back to NFC of the raw path when realpath fails.
+- Honors `CLAUDE_CONFIG_DIR` env var, same as Claude Code — if set, `getClaudeDir()` returns that instead of `~/.claude`.
+- Exposes `normalizeProjectPath()` for callers that want to apply the same normalization themselves.
+
+### Known limitation: Bun/Node hash mismatch for long paths
+
+For `projectPath` encodings longer than 200 characters, Claude Code appends a hash suffix. The hash algorithm differs by runtime: **Bun** uses `Bun.hash` (wyhash), **Node** uses djb2. The shipped Claude Code CLI typically runs under Bun, so a session written by a Node consumer of this library (which always uses djb2) lands in a different directory than the Bun-executed CLI looks in, producing "No conversation found with session ID" on resume.
+
+Affected only when the encoded path exceeds 200 chars — roughly, a project path with deeply nested directories totalling over 200 characters of alphanumerics. Rare in practice but worth knowing.
+
+Workarounds:
+
+- Keep project paths shorter than ~200 characters (trivially satisfied by most real workspaces).
+- Run the consumer under Bun, so `Bun.hash` is available and matches the CLI.
+- `findProjectDir()` and `resolveSessionPath()` already apply a prefix-match fallback on *read* to find dirs produced by the other hash, so listing and resuming existing sessions works either way. Only fresh *writes* hit the mismatch.
 
 ### Minimum viable record
 
