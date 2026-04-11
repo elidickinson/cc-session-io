@@ -1,6 +1,8 @@
 # Claude Code Session Internals
 
-Tested against Claude Code **2.1.83** (March 2026). Items marked ✅ were confirmed through direct experimentation; ❓ marks unconfirmed assumptions.
+**April 11, 2026**
+
+Items marked ❓ indicate unconfirmed assumptions. ⚠️ marks important caveats and edge cases.
 
 ## Storage Locations
 
@@ -8,12 +10,24 @@ All under `~/.claude/`:
 
 | Path | Format | Purpose | Required for `--resume`? |
 |------|--------|---------|----|
-| `projects/-<path-hash>/<sessionId>.jsonl` | JSONL | Per-session conversation log | ✅ Yes — this alone is sufficient |
-| `projects/-<path-hash>/sessions-index.json` | JSON | Session metadata index | ✅ No — CC finds sessions by scanning JSONL files |
-| `__store.db` | SQLite 3 | Costs, summaries, message metadata | ✅ No — verified zero rows for active sessions |
+| `projects/<path-hash>/<sessionId>.jsonl` | JSONL | Per-session conversation log | Yes — this alone is sufficient |
+| `projects/<path-hash>/sessions-index.json` | JSON | Session metadata index | No — CC finds sessions by scanning JSONL files |
+| `__store.db` | SQLite 3 | Costs, summaries, message metadata | No — not used for session resume |
 | `sessions/*.json` | JSON | Currently-running session PIDs | ❓ Not tested |
 
-The **path hash** is the project's absolute path with `/` replaced by `-`, prefixed with `-`. ✅ Confirmed: `/Users/esd/projects/cc-session` → `-Users-esd-projects-cc-session`.
+The **path hash** replaces all non-alphanumeric characters in the project path with dashes. Long paths (>200 chars) are truncated to 200 characters with a hash suffix. Typically starts with `-` because absolute paths begin with `/` which gets replaced.
+
+Example: `/Users/esd/projects/cc-session` → `-Users-esd-projects-cc-session`
+
+**⚠️ Runtime dependency:** The hash function differs between runtimes:
+- **Bun:** Uses `Bun.hash()` (wyhash algorithm)
+- **Node.js:** Uses `djb2Hash()` (djb2 algorithm)
+
+**For paths ≤200 characters** (the common case): No hash is involved — both runtimes produce identical directory names.
+
+**For paths >200 characters**: Different hash functions produce different suffixes for the same project path. The `findProjectDir()` function in `src/utils/sessionStoragePortable.ts` handles this on the read path (resume) with prefix scanning, but:
+- **cc-session-io does NOT have this fallback** — it could fail to find directories created by Bun for long paths
+- Libraries that create sessions should use `djb2Hash` unconditionally for maximum compatibility
 
 ## JSONL Structure
 
@@ -21,23 +35,42 @@ Each line is one JSON event. Messages form a singly-linked list via `uuid`/`pare
 
 ### Record Types
 
-Sessions start with either `queue-operation` pairs or `file-history-snapshot` — varies across sessions. ✅ Confirmed neither is required for resume.
+Sessions start with either `queue-operation` pairs or `file-history-snapshot` — varies across sessions. Neither is required for resume.
+
+**⚠️ Legacy compatibility:** Old session files may contain `progress` entries in the UUID chain due to historical bug (#14373, #23537). These are now filtered out during resume to prevent chain forks.
+
+**Note:** `compact_boundary` is a subtype of `system` messages, not a top-level type (format: `{"type":"system","subtype":"compact_boundary"}`). On resume for files >5MB, `readTranscriptForLoad()` scans for the boundary marker and **discards all pre-boundary content**. The `parentUuid` is set to `null` at the boundary (logical parent preserved in `logicalParentUuid`).
+
+**⚠️ Critical:** `content-replacement` entries record large content blocks that were replaced with smaller stubs in the transcript to manage file size. These stubs are re-inflated on resume for **prompt cache stability** — without this feature, resumed sessions would invalidate the Anthropic API's prompt cache, significantly increasing token costs.
 
 | Type | Purpose | Frequency |
 |------|---------|-----------|
 | `user` | User message or tool results | Every session |
 | `assistant` | Assistant response (full API response body) | Every session |
-| `queue-operation` | Enqueue/dequeue bookends | ✅ Most sessions, but not all |
-| `file-history-snapshot` | File state at message time | ✅ Most sessions, but not all |
-| `progress` | Subagent activity updates | Sessions with subagents |
-| `compact_boundary` | Context compression points | ❓ Long sessions |
-| `last-prompt` | Last user prompt text | ❓ Session end |
-| `custom-title` | User-set session title | ❓ Renamed sessions |
-| `agent-name` | Agent name | ❓ Named agents |
+| `attachment` | System messages (attachments, notifications) | Varies |
+| `system` | System events including compact_boundary | Varies |
+| `queue-operation` | Enqueue/dequeue bookends | Most sessions, but not all |
+| `file-history-snapshot` | File state at message time | Most sessions, but not all |
+| `progress` | Subagent activity updates | Still written but filtered from chain |
+| `last-prompt` | Last user prompt text | Session end |
+| `custom-title` | User-set session title | Renamed sessions |
+| `ai-title` | AI-generated session title | Some sessions |
+| `tag` | Searchable session tags | Tagged sessions |
+| `agent-name` | Agent name | Named agents |
+| `agent-color` | Agent UI color | Named agents |
+| `agent-setting` | Agent definition used | Named agents |
+| `summary` | Conversation summaries | Long sessions |
+| `task-summary` | Periodic agent activity summaries | Active sessions |
+| `mode` | coordinator/normal mode marker | Swarm sessions |
+| `worktree-state` | Git worktree tracking | Worktree sessions |
+| `content-replacement` | Large content block stub references | Large sessions |
+| `attribution-snapshot` | Character-level contribution tracking | Some sessions |
+| `pr-link` | GitHub PR association | Linked sessions |
+| `speculation-accept` | Speculative execution timing | Proactive mode |
+| `marble-origami-commit` | Context collapse commits | Gate-enabled |
+| `marble-origami-snapshot` | Context collapse state | Gate-enabled |
 
 ### Shared Fields on User/Assistant Records
-
-All fields verified against real session files ✅:
 
 ```
 uuid            — UUID v4, primary key for this record
@@ -55,8 +88,21 @@ entrypoint      — always "cli" in observed data
 message         — the message payload (see below)
 ```
 
-**Minimum fields required for resume** ✅ (confirmed by creating synthetic sessions with only these):
-`type`, `uuid`, `parentUuid`, `sessionId`, `timestamp`, `message`
+**Minimum fields for successful resume** ⚠️
+
+The resume path (`loadTranscriptFile()` → `buildConversationChain()` → `removeExtraFields()`) does no schema validation. It dispatches on `entry.type`, keys a Map on `entry.uuid`, and walks `entry.parentUuid`.
+
+**Chain reconstruction** (what's needed for loading):
+- `type` — must be one of `user`, `assistant`, `attachment`, or `system`
+- `uuid` — used as map key and for parent-child linking
+- `parentUuid` — for chain walking (null is valid for first message)
+
+**Message display** (what's needed to be useful):
+- `message` — the actual content payload
+
+**All other fields** (`timestamp`, `sessionId`, `cwd`, `version`, `isSidechain`, etc.) are accessed downstream but the code degrades gracefully. Missing boolean fields default to falsy due to JavaScript's `undefined` semantics.
+
+Synthetic sessions with `type`, `uuid`, `parentUuid`, `sessionId`, `timestamp`, `message` resume successfully. Fallback values are provided for missing metadata fields (e.g., `firstPrompt` defaults to "(session)").
 
 ### User-Specific Fields
 
@@ -82,7 +128,7 @@ When content is a string, it's a plain text message. When it's an array, it typi
 requestId       — Anthropic API request ID (e.g. "req_011CZQ...")
 ```
 
-**Assistant message payload** is the full Anthropic API response body ✅:
+**Assistant message payload** is the full Anthropic API response body:
 
 ```json
 {
@@ -101,9 +147,9 @@ requestId       — Anthropic API request ID (e.g. "req_011CZQ...")
 }
 ```
 
-### Tool Use Round-Trip ✅
+### Tool Use Round-Trip
 
-Confirmed that synthetic tool use/result pairs work correctly on resume:
+Synthetic tool use/result pairs work correctly on resume:
 
 1. Assistant record with `tool_use` content block (`stop_reason: "tool_use"`)
 2. User record with `tool_result` content block (matching `tool_use_id`)
@@ -118,10 +164,9 @@ Confirmed that synthetic tool use/result pairs work correctly on resume:
 
 ## SQLite Schema (`__store.db`)
 
-✅ Not required for resume. Verified that active sessions have zero rows in the DB.
-Appears to serve analytics/UI features (cost tracking, cross-project queries) rather than session replay.
+**Not required for resume** — No references to `__store.db` or SQLite storage in the session resume path. All session persistence uses JSONL format only.
 
-Schema verified against real DB ✅:
+This file appears to serve analytics/UI features (cost tracking, cross-project queries) for the IDE/bridge components, not the CLI session resume path.
 
 - **base_messages** — uuid (PK), parent_uuid, session_id, timestamp (int ms), message_type, cwd, user_type, version, isSidechain (int 0/1), original_cwd
 - **user_messages** — uuid (FK), message (JSON), tool_use_result (JSON), timestamp (int), is_at_mention_read, is_meta
@@ -130,9 +175,9 @@ Schema verified against real DB ✅:
 
 ## Session Index (`sessions-index.json`)
 
-✅ Not required for resume. CC finds sessions by scanning JSONL files directly.
-Projects with active sessions can have no index file at all (confirmed).
-❓ May speed up the `--resume` picker for projects with many sessions.
+**Not required for resume** — No references to `sessions-index`, `sessionsIndex`, or `session-index` in the CLI source tree. Session discovery is purely `readdir()` + `stat()` of `.jsonl` files.
+
+Projects with active sessions can have no index file at all. The CLI does not read or write this file; it may be maintained by other Claude Code clients (VS Code extension, web app).
 
 ```json
 {
@@ -159,11 +204,9 @@ None. No signatures, checksums, HMACs, or server-side tracking. The API is state
 
 ## Generating Sessions from Scratch
 
-✅ A minimal resumable session requires **only a JSONL file** in the correct project directory.
+A minimal resumable session requires **only a JSONL file** in the correct project directory. Neither `sessions-index.json` entries nor `__store.db` rows are needed.
 
-Previously assumed to require all three artifacts (JSONL + session index + SQLite). Direct testing confirmed that only the JSONL file is needed. Neither `sessions-index.json` entries nor `__store.db` rows are required for `claude --resume <session-id>`.
-
-### Minimum Viable JSONL ✅
+### Minimum Viable JSONL
 
 Tested successfully with just these fields per record:
 
@@ -172,27 +215,27 @@ Tested successfully with just these fields per record:
 {"type":"assistant","uuid":"<uuid>","parentUuid":"<user-uuid>","sessionId":"<session-uuid>","timestamp":"<ISO 8601>","message":{"id":"msg_syn","type":"message","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}}
 ```
 
-No `queue-operation` bookends, `file-history-snapshot`, `cwd`, `version`, `isSidechain`, `slug`, or any other fields required. ✅ Confirmed by resume test.
+No `queue-operation` bookends, `file-history-snapshot`, `cwd`, `version`, `isSidechain`, `slug`, or any other fields required.
 
-### What's Not Required ✅
+### What's Not Required
 
 - `queue-operation` enqueue/dequeue pairs — not needed
 - `file-history-snapshot` — not needed
-- `sessions-index.json` entry — not needed
-- `__store.db` rows — not needed
-- Fields: `cwd`, `isSidechain`, `version`, `userType`, `gitBranch`, `slug`, `entrypoint`, `permissionMode`, `promptId` — all optional
+- `sessions-index.json` entry — not needed for CLI resume
+- `__store.db` rows — not needed (SQLite not used for session storage)
+- Fields: `cwd`, `isSidechain`, `version`, `userType`, `gitBranch`, `slug`, `entrypoint`, `permissionMode`, `promptId` — all optional (resume provides fallbacks or ignores)
 
 ### UUID Chain
 
 The uuid chain is trivial: each message's `parentUuid` = previous message's `uuid`. First message has `parentUuid: null`.
 
-### Tool Use Mapping ✅
+### Tool Use Mapping
 
 Tool use/result round-trips work in synthetic sessions. The pattern:
 1. Assistant message with `tool_use` content block and `stop_reason: "tool_use"`
 2. User message with `tool_result` content block referencing the same `tool_use_id`
 
-No one has built a session generator or cross-agent converter yet. The ecosystem is all read/visualize.
+The ecosystem is primarily read/visualize tools. cc-session-io is a session generator that can create resumable sessions from scratch.
 
 ## Related Projects
 
