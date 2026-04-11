@@ -206,11 +206,11 @@ Dispatch rules:
 
 Writes all pending records to disk. Creates the JSONL file and parent directories if needed. Appends if the file already exists.
 
-### Session reuse and cleanup
+### Session cleanup
 
 #### `session.clear(): void`
 
-Resets an open `Session` to empty state so the same `sessionId` can be reused with fresh contents. Wipes in-memory records, deletes the on-disk `.jsonl` file, and removes the companion directory (Claude Code v2.1.x writes `subagents/` and `tool-results/` there). After `clear()`, the next `save()` writes a fresh file rather than appending.
+Resets the session to empty state: wipes in-memory records, deletes the on-disk `.jsonl` file, and removes the companion directory (Claude Code v2.1.x writes `subagents/` and `tool-results/` there). The next `save()` writes a fresh file.
 
 ```typescript
 session.clear();
@@ -220,7 +220,7 @@ session.save(); // writes a new file at the original jsonlPath
 
 #### `deleteSession(sessionId, projectPath, claudeDir?): void`
 
-Standalone export that deletes a session's `.jsonl` file and companion directory without needing to open it first. No-op if the file doesn't exist.
+Deletes a session's `.jsonl` file and companion directory without opening it. No-op if the file doesn't exist.
 
 ```typescript
 import { deleteSession } from 'cc-session-io';
@@ -240,13 +240,16 @@ const jsonlString = serializeJsonl(records);
 ### Path utilities
 
 ```typescript
-import { projectPathToHash, getProjectDir, getSessionPath } from 'cc-session-io';
+import { projectPathToHash, getProjectDir, getSessionPath, getClaudeDir, normalizeProjectPath } from 'cc-session-io';
 
 projectPathToHash('/Users/me/project');
 // => '-Users-me-project'
 
 getSessionPath('uuid-here', '/Users/me/project');
 // => '/Users/me/.claude/projects/-Users-me-project/uuid-here.jsonl'
+
+getClaudeDir();           // ~/.claude, or CLAUDE_CONFIG_DIR if set
+normalizeProjectPath('/path/to/project');  // realpathSync + NFC normalization
 ```
 
 ## Content Block Format
@@ -270,9 +273,9 @@ This library writes JSONL files that match the real Claude Code format. On resum
 
 To place session files where Claude Code will actually find them, this library:
 
-- Resolves `projectPath` via `realpathSync` + NFC normalization before hashing. Claude Code does the same in its bootstrap, so a caller passing `process.cwd()` from a shell that entered via a symlinked directory (common on macOS: `/tmp`, `/var`, user-symlinked project dirs) still writes to the symlink target's hash dir, matching where Claude Code reads from on resume. Falls back to NFC of the raw path when realpath fails.
-- Honors `CLAUDE_CONFIG_DIR` env var, same as Claude Code — if set, `getClaudeDir()` returns that instead of `~/.claude`.
-- Exposes `normalizeProjectPath()` for callers that want to apply the same normalization themselves.
+- Resolves `projectPath` via `realpathSync` + NFC normalization before hashing, matching what Claude Code does in its bootstrap. A caller passing `process.cwd()` from a shell that entered via a symlink (common on macOS: `/tmp`, `/var`, user-symlinked dirs) still writes to the correct hash dir. Falls back to NFC of the raw path when realpath fails.
+- Honors `CLAUDE_CONFIG_DIR`, same as Claude Code. `getClaudeDir()` returns it when set, otherwise `~/.claude`.
+- `normalizeProjectPath()` is exported for callers that want to apply the same normalization.
 
 ### Known limitation: Bun/Node hash mismatch for long paths
 
@@ -284,7 +287,7 @@ Workarounds:
 
 - Keep project paths shorter than ~200 characters (trivially satisfied by most real workspaces).
 - Run the consumer under Bun, so `Bun.hash` is available and matches the CLI.
-- `findProjectDir()` and `resolveSessionPath()` already apply a prefix-match fallback on *read* to find dirs produced by the other hash, so listing and resuming existing sessions works either way. Only fresh *writes* hit the mismatch.
+- Internally, session lookup applies a prefix-match fallback to find dirs produced by the other hash, so listing and resuming existing sessions works either way. Only fresh *writes* hit the mismatch.
 
 ### Minimum viable record
 
