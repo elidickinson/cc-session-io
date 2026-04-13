@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, appendFileSync, existsSync, rmSync } from 'no
 import { dirname } from 'node:path';
 import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
+import { repairToolPairing } from './repair.js';
 import type {
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
@@ -221,6 +222,7 @@ export class Session {
    * appropriate internal method based on role and content type.
    */
   importMessages(messages: { role: 'user' | 'assistant'; content: string | ContentBlock[] }[]): void {
+    messages = repairToolPairing(messages);
     for (const msg of messages) {
       if (msg.role === 'assistant') {
         const content = typeof msg.content === 'string'

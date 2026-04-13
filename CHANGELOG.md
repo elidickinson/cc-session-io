@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Add `repairToolPairing()` — fixes orphaned/missing `tool_use`/`tool_result`
+  pairs in Anthropic-format message arrays. Injects synthetic error results for
+  missing tool results, drops orphan tool results with no matching tool use, and
+  handles consecutive assistant messages.
+- `importMessages()` now calls `repairToolPairing()` automatically, so callers
+  no longer need to pre-process messages before importing.
+
 ## 0.2.0
 
 - Add `Session.clear()` to reset an open session to empty state, deleting its
