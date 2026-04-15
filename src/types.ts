@@ -25,7 +25,20 @@ export interface ToolResultBlock {
   is_error?: boolean;
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
+export interface ImageBlock {
+  type: 'image';
+  source:
+    | { type: 'base64'; media_type: string; data: string }
+    | { type: 'url'; url: string };
+}
+
+export type ContentBlock =
+  | TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock | ImageBlock;
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string | ContentBlock[];
+}
 
 // -- Assistant message payload (Anthropic API response shape) --
 

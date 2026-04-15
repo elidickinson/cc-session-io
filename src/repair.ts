@@ -1,6 +1,4 @@
-import type { ContentBlock } from './types.js';
-
-type Message = { role: 'user' | 'assistant'; content: string | ContentBlock[] };
+import type { ContentBlock, Message } from './types.js';
 
 /**
  * Repair tool_use / tool_result pairing in an Anthropic-format message array.

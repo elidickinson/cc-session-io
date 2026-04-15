@@ -7,6 +7,7 @@ import { repairToolPairing } from './repair.js';
 import type {
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
+  Message,
 } from './types.js';
 
 // -- Slug generation --
@@ -221,7 +222,7 @@ export class Session {
    * Import an array of Anthropic API-shaped messages, dispatching each to the
    * appropriate internal method based on role and content type.
    */
-  importMessages(messages: { role: 'user' | 'assistant'; content: string | ContentBlock[] }[]): void {
+  importMessages(messages: Message[]): void {
     messages = repairToolPairing(messages);
     for (const msg of messages) {
       if (msg.role === 'assistant') {
