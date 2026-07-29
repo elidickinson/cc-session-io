@@ -4,7 +4,7 @@ export { repairToolPairing } from './repair.js';
 export { projectPathToHash, getProjectDir, getSessionPath, getClaudeDir, normalizeProjectPath } from './paths.js';
 export type {
   JsonlRecord, UserRecord, AssistantRecord, UnknownRecord,
-  ContentBlock, TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock, ImageBlock,
+  ContentBlock, UserContentBlock, TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock, ImageBlock,
   Message, AssistantMessagePayload, UserMessagePayload,
   ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
   BaseRecordFields,

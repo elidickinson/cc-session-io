@@ -5,7 +5,7 @@ import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
 import { repairToolPairing } from './repair.js';
 import type {
-  JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock,
+  JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock, UserContentBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
   Message,
 } from './types.js';
@@ -126,13 +126,16 @@ export class Session {
     return record;
   }
 
-  /** Add a user text message. Returns its uuid. */
-  addUserMessage(text: string): string {
+  /** Add a user message, as plain text or content blocks. Returns its uuid. */
+  addUserMessage(content: string | UserContentBlock[]): string {
+    if (Array.isArray(content) && content.length === 0) {
+      throw new Error('addUserMessage: content array is empty; Anthropic rejects empty message content');
+    }
     const base = this.baseFields();
     const record: UserRecord = {
       type: 'user',
       ...base,
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
     };
     this._pendingRecords.push(record);
     return base.uuid;
@@ -237,20 +240,23 @@ export class Session {
           const toolResults = msg.content.filter(
             (b): b is ToolResultBlock => b.type === 'tool_result',
           );
+          // Anything that isn't a tool result still belongs to the user. Claude
+          // Code never mixes the two in one record, and repairToolPairing can
+          // inject a synthetic result into a message that already has content,
+          // so the remainder is emitted as its own message rather than dropped.
+          const rest = msg.content.filter(
+            (b): b is UserContentBlock => b.type !== 'tool_result',
+          );
           if (toolResults.length > 0) {
             this.addToolResults(toolResults.map(r => ({
               toolUseId: r.tool_use_id,
               content: r.content,
               isError: r.is_error,
             })));
-          } else {
-            // User message with non-tool content blocks — extract text
-            const text = msg.content
-              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-              .map(b => b.text)
-              .join('\n');
-            this.addUserMessage(text || JSON.stringify(msg.content));
           }
+          // Blocks are passed through as-is: flattening to text would drop
+          // images, and an image-only message has no text to fall back to.
+          if (rest.length > 0) this.addUserMessage(rest);
         }
       }
     }

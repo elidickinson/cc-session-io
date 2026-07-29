@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2
+
+- Fix `importMessages()` dropping user content blocks. Images were discarded
+  when they accompanied text, an image-only message was stringified into the
+  transcript as prose, and anything alongside a `tool_result` was lost —
+  including the user's whole message when `repairToolPairing()` injected a
+  synthetic result into it. Blocks are now written through unchanged.
+- `addUserMessage()` takes user content blocks as well as a string, typed by
+  the new `UserContentBlock` export, and throws on an empty array.
+
 ## 0.3.0
 
 - Add `repairToolPairing()` — fixes orphaned/missing `tool_use`/`tool_result`

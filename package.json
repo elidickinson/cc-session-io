@@ -1,6 +1,6 @@
 {
   "name": "cc-session-io",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Read, write, and create Claude Code session files (unofficial)",
   "type": "module",
   "main": "./dist/index.js",

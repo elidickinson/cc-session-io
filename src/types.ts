@@ -35,6 +35,9 @@ export interface ImageBlock {
 export type ContentBlock =
   | TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock | ImageBlock;
 
+/** Blocks valid in a user message. `thinking` and `tool_use` are assistant-only. */
+export type UserContentBlock = TextBlock | ToolResultBlock | ImageBlock;
+
 export interface Message {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];

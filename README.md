@@ -110,9 +110,11 @@ Reads a session directly from a JSONL file path.
 | `records` | `JsonlRecord[]` | All JSONL records (including non-message types). |
 | `messages` | `(UserRecord \| AssistantRecord)[]` | Only user and assistant records. |
 
-#### `session.addUserMessage(text): string`
+#### `session.addUserMessage(content): string`
 
-Adds a user text message. Returns the record's UUID.
+Adds a user message. `content` is either a string or an array of user content
+blocks (`text`, `image`, `tool_result`), which are written unchanged. Throws on
+an empty array, which Anthropic rejects. Returns the record's UUID.
 
 #### `session.addAssistantMessage(content, opts?): string`
 
@@ -199,8 +201,9 @@ session.importMessages([
 Dispatch rules:
 - `assistant` → `addAssistantMessage()` (string content wrapped in a text block)
 - `user` string → `addUserMessage()`
-- `user` array with `tool_result` blocks → `addToolResults()`
-- `user` array with only `text` blocks → `addUserMessage()` (text joined with newlines)
+- `user` array with `tool_result` blocks → `addToolResults()`, and any remaining
+  blocks follow as a separate `addUserMessage()` record
+- `user` array without `tool_result` blocks → `addUserMessage()` (blocks kept as-is)
 
 #### `session.save(): void`
 

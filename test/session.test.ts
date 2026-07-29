@@ -266,6 +266,99 @@ describe('importMessages', () => {
     expect(toolResult.tool_use_id).toBe('toolu_original_id');
   });
 
+  test('preserves image blocks alongside text in a user message', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'user', content: [
+        { type: 'text', text: 'what is in this screenshot?' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } },
+      ]},
+    ]);
+
+    const user = session.messages[0] as UserRecord;
+    expect(user.message.content).toEqual([
+      { type: 'text', text: 'what is in this screenshot?' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } },
+    ]);
+  });
+
+  // An image-only message has no text to fall back to, so a text-only import
+  // path serialises the whole block array into the transcript as prose.
+  test('preserves an image-only user message without stringifying it', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } },
+      ]},
+    ]);
+
+    const user = session.messages[0] as UserRecord;
+    expect(Array.isArray(user.message.content)).toBe(true);
+    expect(user.message.content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } },
+    ]);
+  });
+
+  test('preserves text alongside tool results in the same user message', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu_mixed', name: 'x', input: {} },
+      ]},
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_mixed', content: 'ok' },
+        { type: 'text', text: 'keep me' },
+      ]},
+    ]);
+
+    const flat = JSON.stringify(session.messages);
+    expect(flat).toContain('keep me');
+  });
+
+  // repairToolPairing answers an orphan tool_use by injecting a synthetic result
+  // into the following user message, which must not swallow what was already there.
+  test('keeps user content when repair injects a synthetic tool result', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu_orphan', name: 'x', input: {} },
+      ]},
+      { role: 'user', content: [
+        { type: 'text', text: 'look at this' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BASE64DATA' } },
+      ]},
+    ]);
+
+    const flat = JSON.stringify(session.messages);
+    expect(flat).toContain('look at this');
+    expect(flat).toContain('BASE64DATA');
+  });
+
+  test('rejects an empty user content array', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    expect(() => session.addUserMessage([])).toThrow(/empty/i);
+  });
+
   test('handles assistant string content', () => {
     const session = createSession({
       projectPath: '/tmp/test-project',
