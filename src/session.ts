@@ -5,7 +5,7 @@ import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
 import { repairToolPairing } from './repair.js';
 import type {
-  AttachmentRecord,
+  AttachmentRecord, BaseRecordFields,
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock, UserContentBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
   Message,
@@ -149,6 +149,42 @@ export class Session {
   }
 
   /**
+   * Append a record verbatim. The escape hatch for record types this library
+   * does not model — `queue-operation`, `last-prompt`, anything a future Claude
+   * Code release adds — and for carrying records from one session into another.
+   *
+   * Dangerous because nothing is synthesized or checked beyond `sessionId` and
+   * the parent link: the shape is whatever you pass, and Claude Code will read
+   * it back. `sessionId` is overwritten with this session's, since a record
+   * claiming another session is never what a caller wants. The record does not
+   * join the uuid chain, so a following message still parents to the last real
+   * message.
+   *
+   * The one guard is on `parentUuid`, because that is the failure that does not
+   * announce itself: a dangling parent makes Claude Code resume with empty
+   * context and answer confidently from nothing.
+   */
+  dangerousAppendRecord(record: JsonlRecord, opts?: { parentUuid?: string | null }): void {
+    const parentUuid = opts?.parentUuid !== undefined
+      ? opts.parentUuid
+      : (record as Partial<BaseRecordFields>).parentUuid;
+    if (parentUuid != null) {
+      const known = this.records.some(r => (r as Partial<BaseRecordFields>).uuid === parentUuid);
+      if (!known) {
+        throw new Error(
+          `dangerousAppendRecord: parentUuid ${parentUuid} is not a record in this session; ` +
+          `a dangling parent makes Claude Code resume with empty context`,
+        );
+      }
+    }
+    this._pendingRecords.push({
+      ...record,
+      ...(parentUuid !== undefined ? { parentUuid } : {}),
+      sessionId: this.sessionId,
+    } as JsonlRecord);
+  }
+
+  /**
    * Add an attachment record. `parentUuid` defaults to the record this session
    * would currently chain from; pass it explicitly when re-attaching a record
    * carried over from another session, where the message it belongs to has been
@@ -177,7 +213,7 @@ export class Session {
       slug: this._slug,
       entrypoint: 'cli',
     };
-    this._pendingRecords.push(record);
+    this.dangerousAppendRecord(record);
     return uuid;
   }
 

@@ -12,6 +12,13 @@
   control — needed when carrying a record into a session where the message it
   belongs to has been given a new uuid. An attachment does not advance the
   message chain, matching how Claude Code writes them.
+- `session.dangerousAppendRecord(record, opts?)` appends a record verbatim, for
+  record types this library does not model and for carrying records between
+  sessions. It synthesizes nothing — the typed helpers stay message- and
+  attachment-only, since `queue-operation` and `last-prompt` share almost none of
+  the base fields and stamping those on would produce records Claude Code never
+  writes. It overwrites `sessionId` and rejects a dangling `parentUuid`, which is
+  the failure that otherwise resumes with empty context and answers from nothing.
 - README gains a Scope section stating what the library reads and writes, what
   it preserves without being able to author, and what it does not handle.
 

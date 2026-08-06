@@ -14,10 +14,13 @@ Claude Code's own injected context, such as an `@file` expansion. `importMessage
 repairs tool_use/tool_result pairing on the way in. Sessions written this way
 resume in Claude Code.
 
-**Preserves but does not author** every other record type Claude Code writes
-(`queue-operation`, `last-prompt`, summaries, and anything added by a future
-release). They survive a read-modify-write untouched via `UnknownRecord`, but
-there is no API to create one.
+**Preserves** every other record type Claude Code writes (`queue-operation`,
+`last-prompt`, summaries, and anything added by a future release) through
+`UnknownRecord`, so a read-modify-write leaves them untouched. Writing one means
+`dangerousAppendRecord()`, which appends whatever you hand it — the typed helpers
+only cover messages and attachments, because the other record types share almost
+none of their fields and synthesizing those would produce records Claude Code
+never writes.
 
 **Does not handle** subagent transcripts: `isSidechain` is always written `false`,
 and Claude Code keeps sub-agent conversations in a separate `subagents/` directory
@@ -136,6 +139,25 @@ Reads a session directly from a JSONL file path.
 Adds a user message. `content` is either a string or an array of user content
 blocks (`text`, `image`, `tool_result`), which are written unchanged. Throws on
 an empty array, which Anthropic rejects. Returns the record's UUID.
+
+#### `session.dangerousAppendRecord(record, opts?): void`
+
+Appends a record verbatim. The escape hatch for record types this library does not
+model, and for carrying records from one session into another.
+
+Dangerous because nothing is synthesized or validated beyond `sessionId` and the
+parent link — the shape is whatever you pass, and Claude Code will read it back.
+`sessionId` is overwritten with this session's, since a record claiming another
+session is never what a caller wants. The record does not join the uuid chain.
+
+`parentUuid` is the one thing checked: a dangling parent makes Claude Code resume
+with **empty context** and answer confidently from nothing, and it does not
+announce itself, so it throws instead.
+
+```typescript
+// Carry an attachment from a previous session onto its rebuilt message
+target.dangerousAppendRecord(previous.attachments[0], { parentUuid: newMessageUuid });
+```
 
 #### `session.addAttachment(attachment, opts?): string`
 

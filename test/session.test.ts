@@ -572,3 +572,56 @@ describe('attachments', () => {
     expect(reread.attachments[0].attachment).toEqual(fileAttachment);
   });
 });
+
+describe('dangerousAppendRecord', () => {
+  test('appends verbatim, keeping fields the library does not model', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    const userUuid = session.addUserMessage('hello');
+    session.dangerousAppendRecord({
+      type: 'queue-operation',
+      operation: { kind: 'enqueue', value: 42 },
+      parentUuid: userUuid,
+    } as any);
+    session.save();
+
+    const records = parseJsonl(readFileSync(session.jsonlPath, 'utf8'));
+    const queued = records.find(r => r.type === 'queue-operation') as any;
+    expect(queued.operation).toEqual({ kind: 'enqueue', value: 42 });
+    expect(queued.sessionId).toBe(session.sessionId);
+  });
+
+  test('rehomes a record from another session', () => {
+    const source = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    source.addUserMessage('original');
+    source.addAttachment({ type: 'file', filename: '/a.js' });
+    const carried = source.attachments[0];
+
+    const target = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    const newParent = target.addUserMessage('rebuilt');
+    target.dangerousAppendRecord(carried, { parentUuid: newParent });
+
+    const moved = target.attachments[0];
+    expect(moved.attachment).toEqual({ type: 'file', filename: '/a.js' });
+    expect(moved.sessionId).toBe(target.sessionId);
+    expect(moved.parentUuid).toBe(newParent);
+    expect(moved.sessionId).not.toBe(source.sessionId);
+  });
+
+  test('refuses a dangling parentUuid', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('hello');
+    expect(() =>
+      session.dangerousAppendRecord({ type: 'attachment', attachment: { type: 'file' } } as any,
+        { parentUuid: '00000000-0000-0000-0000-000000000000' })
+    ).toThrow(/not a record in this session/);
+  });
+
+  test('does not join the uuid chain', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    const userUuid = session.addUserMessage('hello');
+    session.dangerousAppendRecord({ type: 'last-prompt', lastPrompt: 'hello', leafUuid: userUuid } as any);
+    const assistantUuid = session.addAssistantMessage([{ type: 'text', text: 'hi' }]);
+    const assistant = session.messages.find(m => m.uuid === assistantUuid)!;
+    expect(assistant.parentUuid).toBe(userUuid);
+  });
+});
