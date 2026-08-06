@@ -148,7 +148,8 @@ model, and for carrying records from one session into another.
 Dangerous because nothing is synthesized or validated beyond `sessionId` and the
 parent link — the shape is whatever you pass, and Claude Code will read it back.
 `sessionId` is overwritten with this session's, since a record claiming another
-session is never what a caller wants. The record does not join the uuid chain.
+session is never what a caller wants. The record is appended verbatim and does not advance the chain — unlike
+`addAttachment`, which does, because Claude Code threads attachments through it.
 
 `parentUuid` is the one thing checked: a dangling parent makes Claude Code resume
 with **empty context** and answer confidently from nothing, and it does not
@@ -167,11 +168,15 @@ record rather than as part of a message. The payload shape varies by
 cannot regenerate, and Claude Code rewrites the rest (`skill_listing`,
 `task_reminder`, `agent_listing_delta`, …) every turn.
 
-An attachment hangs off the message that caused it and is not part of the message
-chain, so it never becomes the parent of the record that follows. `parentUuid`
-defaults to whatever the session would currently chain from; pass it explicitly
-when carrying a record over from another session, where the message it belongs to
-has been given a new UUID.
+Attachments are links in the uuid chain, not leaves hanging off it — the record
+that follows one parents to the attachment — so this advances the chain exactly as
+the message methods do. `parentUuid` defaults to whatever the session would
+currently chain from; pass it explicitly when carrying a record over from another
+session, where the message it belongs to has been given a new UUID.
+
+Because they sit *in* the chain, inserting one between existing records means
+re-parenting the record that follows it. This API appends, so it covers building a
+session in order; it does not cover splicing into a finished one.
 
 ```typescript
 const userUuid = session.addUserMessage('review @build.js');

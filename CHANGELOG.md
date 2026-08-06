@@ -10,8 +10,11 @@
   `session.addAttachment(attachment, opts?)`, which mints a fresh uuid and fills
   in the session's identity while leaving `parentUuid` under the caller's
   control — needed when carrying a record into a session where the message it
-  belongs to has been given a new uuid. An attachment does not advance the
-  message chain, matching how Claude Code writes them.
+  belongs to has been given a new uuid. Attachments are links in the uuid chain,
+  not leaves: the record after one parents to it, measured across 605 real
+  sessions (3,526 chain through, none skip), so `addAttachment` advances the
+  chain as the message methods do. Splicing one into an already-written session
+  would mean re-parenting the record that follows; this API appends only.
 - `session.dangerousAppendRecord(record, opts?)` appends a record verbatim, for
   record types this library does not model and for carrying records between
   sessions. It synthesizes nothing — the typed helpers stay message- and
