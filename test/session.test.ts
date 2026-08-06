@@ -521,3 +521,54 @@ describe('createSession path normalization', () => {
     expect(user.cwd).toBe(target);
   });
 });
+
+describe('attachments', () => {
+  const fileAttachment = {
+    type: 'file',
+    filename: '/tmp/test-project/build.js',
+    content: { type: 'text', file: { filePath: '/tmp/test-project/build.js', content: 'const x = 1;\n' } },
+  };
+
+  test('hangs off the preceding message without joining the chain', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    const userUuid = session.addUserMessage('review @build.js');
+    session.addAttachment(fileAttachment);
+    const assistantUuid = session.addAssistantMessage([{ type: 'text', text: 'ok' }]);
+
+    const attachment = session.attachments[0];
+    expect(attachment.parentUuid).toBe(userUuid);
+    // The assistant message chains from the user message, not the attachment.
+    const assistant = session.messages.find(m => m.uuid === assistantUuid)!;
+    expect(assistant.parentUuid).toBe(userUuid);
+  });
+
+  test('parentUuid can be supplied when carrying a record into another session', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('first');
+    const second = session.addUserMessage('second');
+    session.addAttachment(fileAttachment, { parentUuid: second });
+    expect(session.attachments[0].parentUuid).toBe(second);
+  });
+
+  test('carries the session identity, and messages exclude it', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir, gitBranch: 'main' });
+    session.addUserMessage('review @build.js');
+    session.addAttachment(fileAttachment);
+    const attachment = session.attachments[0];
+    expect(attachment.sessionId).toBe(session.sessionId);
+    expect(attachment.cwd).toBe('/tmp/test-project');
+    expect(attachment.gitBranch).toBe('main');
+    expect(session.messages).toHaveLength(1);
+  });
+
+  test('survives a save and re-read', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('review @build.js');
+    session.addAttachment(fileAttachment);
+    session.save();
+
+    const reread = readSession(session.jsonlPath, '/tmp/test-project');
+    expect(reread.attachments).toHaveLength(1);
+    expect(reread.attachments[0].attachment).toEqual(fileAttachment);
+  });
+});

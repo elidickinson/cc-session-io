@@ -95,12 +95,28 @@ export interface AssistantRecord extends BaseRecordFields {
   requestId?: string;
 }
 
+/**
+ * Claude Code's own injected context, written as its own record rather than as
+ * part of a message: an `@file` expansion, a skill listing, a task reminder.
+ * The payload shape varies by `attachment.type` and is left open — only `file`
+ * and `edited_text_file` carry content a consumer cannot regenerate, and the
+ * rest Claude Code rewrites every turn.
+ *
+ * An attachment hangs off the message that caused it via `parentUuid` and is
+ * not part of the message chain itself, so it never becomes the parent of the
+ * record that follows.
+ */
+export interface AttachmentRecord extends BaseRecordFields {
+  type: 'attachment';
+  attachment: { type: string; [key: string]: unknown };
+}
+
 export interface UnknownRecord {
   type: string;
   [key: string]: unknown;
 }
 
-export type JsonlRecord = UserRecord | AssistantRecord | UnknownRecord;
+export type JsonlRecord = UserRecord | AssistantRecord | AttachmentRecord | UnknownRecord;
 
 // -- Convenience types for addToolCalls --
 

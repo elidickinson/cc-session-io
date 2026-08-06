@@ -6,6 +6,26 @@ Can create new session history files or read/write existing ones that will work 
 
 No runtime dependencies. Not affiliated or supported by Anthropic, the makers of Claude Code.
 
+## Scope
+
+**Reads and writes** user and assistant message records, with `text`, `thinking`,
+`tool_use`, `tool_result` and `image` content blocks, and `attachment` records —
+Claude Code's own injected context, such as an `@file` expansion. `importMessages`
+repairs tool_use/tool_result pairing on the way in. Sessions written this way
+resume in Claude Code.
+
+**Preserves but does not author** every other record type Claude Code writes
+(`queue-operation`, `last-prompt`, summaries, and anything added by a future
+release). They survive a read-modify-write untouched via `UnknownRecord`, but
+there is no API to create one.
+
+**Does not handle** subagent transcripts: `isSidechain` is always written `false`,
+and Claude Code keeps sub-agent conversations in a separate `subagents/` directory
+that this library neither creates nor manages. See also the [Bun/Node hash
+mismatch](#known-limitation-bunnode-hash-mismatch-for-long-paths) for project paths
+over 200 characters.
+
+
 ## Install
 
 ```
@@ -109,12 +129,39 @@ Reads a session directly from a JSONL file path.
 | `jsonlPath` | `string` | Absolute path to the JSONL file. |
 | `records` | `JsonlRecord[]` | All JSONL records (including non-message types). |
 | `messages` | `(UserRecord \| AssistantRecord)[]` | Only user and assistant records. |
+| `attachments` | `AttachmentRecord[]` | Only attachment records. |
 
 #### `session.addUserMessage(content): string`
 
 Adds a user message. `content` is either a string or an array of user content
 blocks (`text`, `image`, `tool_result`), which are written unchanged. Throws on
 an empty array, which Anthropic rejects. Returns the record's UUID.
+
+#### `session.addAttachment(attachment, opts?): string`
+
+Adds an `attachment` record — Claude Code's injected context, written as its own
+record rather than as part of a message. The payload shape varies by
+`attachment.type`; only `file` and `edited_text_file` carry content a consumer
+cannot regenerate, and Claude Code rewrites the rest (`skill_listing`,
+`task_reminder`, `agent_listing_delta`, …) every turn.
+
+An attachment hangs off the message that caused it and is not part of the message
+chain, so it never becomes the parent of the record that follows. `parentUuid`
+defaults to whatever the session would currently chain from; pass it explicitly
+when carrying a record over from another session, where the message it belongs to
+has been given a new UUID.
+
+```typescript
+const userUuid = session.addUserMessage('review @build.js');
+session.addAttachment(
+  {
+    type: 'file',
+    filename: '/project/build.js',
+    content: { type: 'text', file: { filePath: '/project/build.js', content: source } },
+  },
+  { parentUuid: userUuid },
+);
+```
 
 #### `session.addAssistantMessage(content, opts?): string`
 

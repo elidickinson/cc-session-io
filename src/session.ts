@@ -5,6 +5,7 @@ import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
 import { repairToolPairing } from './repair.js';
 import type {
+  AttachmentRecord,
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock, UserContentBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
   Message,
@@ -107,6 +108,12 @@ export class Session {
     );
   }
 
+  /** Only attachment records — Claude Code's injected context (`@file`
+   *  expansions, skill listings, task reminders). */
+  get attachments(): readonly AttachmentRecord[] {
+    return this.records.filter((r): r is AttachmentRecord => r.type === 'attachment');
+  }
+
   private baseFields(): Omit<UserRecord, 'type' | 'message'> {
     const uuid = randomUUID();
     const record = {
@@ -139,6 +146,39 @@ export class Session {
     };
     this._pendingRecords.push(record);
     return base.uuid;
+  }
+
+  /**
+   * Add an attachment record. `parentUuid` defaults to the record this session
+   * would currently chain from; pass it explicitly when re-attaching a record
+   * carried over from another session, where the message it belongs to has been
+   * given a new uuid. Returns the new record's uuid.
+   *
+   * Unlike the message methods this does not advance the chain — Claude Code
+   * hangs attachments off a message rather than threading them through it.
+   */
+  addAttachment(
+    attachment: { type: string; [key: string]: unknown },
+    opts?: { parentUuid?: string | null },
+  ): string {
+    const uuid = randomUUID();
+    const record: AttachmentRecord = {
+      type: 'attachment',
+      attachment,
+      uuid,
+      parentUuid: opts?.parentUuid !== undefined ? opts.parentUuid : this._lastUuid,
+      sessionId: this.sessionId,
+      timestamp: new Date(this._nextTimestamp++).toISOString(),
+      isSidechain: false,
+      cwd: this._cwd,
+      userType: 'external',
+      version: this._version,
+      gitBranch: this._gitBranch,
+      slug: this._slug,
+      entrypoint: 'cli',
+    };
+    this._pendingRecords.push(record);
+    return uuid;
   }
 
   /** Add an assistant message with the given content blocks. Returns its uuid. */

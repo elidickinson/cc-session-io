@@ -38,12 +38,8 @@ consumer cannot regenerate; the rest Claude Code rewrites every turn.
 
 ### Wanted
 
-1. **A typed view.** An `AttachmentRecord` in the union and an accessor on `Session`,
-   so a caller can enumerate attachments without hand-parsing `UnknownRecord`.
-2. **Append with id rewriting.** A way to add an attachment to a session such that
-   `uuid` is fresh and `sessionId`, `cwd`, `gitBranch` and `timestamp` match the
-   target session, with `parentUuid` supplied by the caller. This is the piece that
-   makes carrying attachments from one session into a rebuilt one possible at all.
+1. ~~**A typed view.**~~ Done in 0.4.0: `AttachmentRecord` and `session.attachments`.
+2. ~~**Append with id rewriting.**~~ Done in 0.4.0: `session.addAttachment()`.
 3. **Decide what `importMessages` should do with them.** Today they are invisible to
    it. They are not messages, so folding them into the `Message[]` shape is probably
    wrong; a separate path is likely cleaner.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+- Attachment record support. Claude Code writes its injected context — an
+  `@file` expansion, a skill listing, a task reminder — as a `type: "attachment"`
+  record rather than as part of a message. Reads already preserved them through
+  `UnknownRecord`, but there was no way to work with one. Adds the
+  `AttachmentRecord` type, a `session.attachments` accessor, and
+  `session.addAttachment(attachment, opts?)`, which mints a fresh uuid and fills
+  in the session's identity while leaving `parentUuid` under the caller's
+  control — needed when carrying a record into a session where the message it
+  belongs to has been given a new uuid. An attachment does not advance the
+  message chain, matching how Claude Code writes them.
+- README gains a Scope section stating what the library reads and writes, what
+  it preserves without being able to author, and what it does not handle.
+
 ## 0.3.2
 
 - Fix `importMessages()` dropping user content blocks. Images were discarded
