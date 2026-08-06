@@ -174,9 +174,20 @@ the message methods do. `parentUuid` defaults to whatever the session would
 currently chain from; pass it explicitly when carrying a record over from another
 session, where the message it belongs to has been given a new UUID.
 
-Because they sit *in* the chain, inserting one between existing records means
-re-parenting the record that follows it. This API appends, so it covers building a
-session in order; it does not cover splicing into a finished one.
+Because they sit *in* the chain, inserting one between existing records would mean
+re-parenting the record that follows, which this method does not do — it appends.
+To place attachments within a conversation, pass them to `importMessages` instead:
+
+```typescript
+session.importMessages(messages, {
+  attachments: [{ afterIndex: 0, attachment: fileAttachment }],
+});
+```
+
+`afterIndex` indexes the array you passed. `repairToolPairing` runs inside the
+import and can insert or drop messages, so positions are mapped through the
+exported `repairWithOrigin()`. An attachment whose message the repair dropped is
+not emitted, so check `session.attachments` when it matters.
 
 ```typescript
 const userUuid = session.addUserMessage('review @build.js');

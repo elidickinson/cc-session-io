@@ -9,7 +9,20 @@ import type { ContentBlock, Message } from './types.js';
  *  3. Consecutive assistant messages → flushes pending results between them
  */
 export function repairToolPairing(messages: Message[]): Message[] {
+  return repairWithOrigin(messages).messages;
+}
+
+/**
+ * The same repair, plus provenance: `origin[i]` is the index in `messages` that
+ * output message `i` came from, or `null` for one the repair synthesized. An
+ * input message the repair dropped has no entry, so a caller keying anything to
+ * input positions must handle its position being absent.
+ */
+export function repairWithOrigin(
+  messages: Message[],
+): { messages: Message[]; origin: (number | null)[] } {
   const result: Message[] = [];
+  const origin: (number | null)[] = [];
   let pending: Set<string> | null = null; // tool_use ids from preceding assistant
 
   const synthetic = (id: string) => ({
@@ -22,11 +35,12 @@ export function repairToolPairing(messages: Message[]): Message[] {
   const flushPending = () => {
     if (pending && pending.size > 0) {
       result.push({ role: 'user', content: [...pending].map(synthetic) });
+      origin.push(null);
     }
     pending = null;
   };
 
-  for (const msg of messages) {
+  for (const [index, msg] of messages.entries()) {
     if (msg.role === 'assistant') {
       flushPending();
       const ids = new Set<string>();
@@ -36,6 +50,7 @@ export function repairToolPairing(messages: Message[]): Message[] {
         }
       }
       result.push(msg);
+      origin.push(index);
       pending = ids.size > 0 ? ids : null;
       continue;
     }
@@ -47,6 +62,7 @@ export function repairToolPairing(messages: Message[]): Message[] {
     // Fast path: nothing to repair — preserve original shape
     if (!pending && !hasToolResults) {
       result.push(msg);
+      origin.push(index);
       continue;
     }
 
@@ -76,12 +92,14 @@ export function repairToolPairing(messages: Message[]): Message[] {
       // with no leading user message (API rejects payloads not starting with user).
       if (result.length === 0) {
         result.push({ role: 'user', content: [{ type: 'text', text: '[orphaned tool result removed]' }] });
+        origin.push(null);
       }
       continue;
     }
     result.push({ ...msg, content: kept });
+    origin.push(index);
   }
 
   flushPending();
-  return result;
+  return { messages: result, origin };
 }

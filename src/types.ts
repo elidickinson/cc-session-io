@@ -127,6 +127,17 @@ export interface ToolCallSpec {
   isError?: boolean;
 }
 
+/**
+ * An attachment to emit while importing, positioned after the message at
+ * `afterIndex` in the array handed to `importMessages`. If the repair drops that
+ * message the attachment is not emitted, so check `session.attachments` when it
+ * matters.
+ */
+export interface ImportAttachment {
+  afterIndex: number;
+  attachment: { type: string; [key: string]: unknown };
+}
+
 // -- Session creation options --
 
 export interface CreateSessionOptions {

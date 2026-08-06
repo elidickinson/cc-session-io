@@ -3,9 +3,9 @@ import { mkdirSync, writeFileSync, appendFileSync, existsSync, rmSync } from 'no
 import { dirname } from 'node:path';
 import { parseJsonlFile, serializeRecord } from './jsonl.js';
 import { getSessionPath, normalizeProjectPath } from './paths.js';
-import { repairToolPairing } from './repair.js';
+import { repairWithOrigin } from './repair.js';
 import type {
-  AttachmentRecord, BaseRecordFields,
+  AttachmentRecord, BaseRecordFields, ImportAttachment,
   JsonlRecord, UserRecord, AssistantRecord, ContentBlock, ToolResultBlock, UserContentBlock,
   AssistantMessagePayload, ToolCallSpec, CreateSessionOptions, OpenSessionOptions,
   Message,
@@ -304,9 +304,18 @@ export class Session {
    * Import an array of Anthropic API-shaped messages, dispatching each to the
    * appropriate internal method based on role and content type.
    */
-  importMessages(messages: Message[]): void {
-    messages = repairToolPairing(messages);
-    for (const msg of messages) {
+  importMessages(messages: Message[], opts?: { attachments?: ImportAttachment[] }): void {
+    const { messages: repaired, origin } = repairWithOrigin(messages);
+    // Attachments sit *in* the chain, so they have to be emitted in order as the
+    // messages are written rather than appended afterwards. Keyed to the caller's
+    // own indices; the repair can insert and drop messages, so `origin` maps back.
+    const following = new Map<number, ImportAttachment[]>();
+    for (const a of opts?.attachments ?? []) {
+      const list = following.get(a.afterIndex);
+      if (list) list.push(a);
+      else following.set(a.afterIndex, [a]);
+    }
+    for (const [i, msg] of repaired.entries()) {
       if (msg.role === 'assistant') {
         const content = typeof msg.content === 'string'
           ? [{ type: 'text' as const, text: msg.content }]
@@ -337,6 +346,10 @@ export class Session {
           // images, and an image-only message has no text to fall back to.
           if (rest.length > 0) this.addUserMessage(rest);
         }
+      }
+      const src = origin[i];
+      if (src !== null) {
+        for (const a of following.get(src) ?? []) this.addAttachment(a.attachment);
       }
     }
   }

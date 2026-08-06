@@ -625,3 +625,60 @@ describe('dangerousAppendRecord', () => {
     expect(assistant.parentUuid).toBe(userUuid);
   });
 });
+
+describe('importMessages with attachments', () => {
+  const att = (name: string) => ({ type: 'file', filename: name });
+
+  test('emits the attachment after its message, inside the chain', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.importMessages(
+      [
+        { role: 'user', content: 'review @a.js' },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      ],
+      { attachments: [{ afterIndex: 0, attachment: att('/a.js') }] },
+    );
+    const [user, attachment, assistant] = session.records as any[];
+    expect(user.type).toBe('user');
+    expect(attachment.type).toBe('attachment');
+    expect(attachment.parentUuid).toBe(user.uuid);
+    expect(assistant.type).toBe('assistant');
+    expect(assistant.parentUuid).toBe(attachment.uuid);
+  });
+
+  test('positions survive a repair that inserts a synthetic result', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    // The assistant's tool_use has no matching result, so repairToolPairing
+    // injects one — shifting every later message by one.
+    session.importMessages(
+      [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: {} }] },
+        { role: 'user', content: 'review @b.js' },
+      ],
+      { attachments: [{ afterIndex: 2, attachment: att('/b.js') }] },
+    );
+    const records = session.records as any[];
+    const idx = records.findIndex(r => r.type === 'attachment');
+    const parent = records[idx - 1];
+    expect(parent.type).toBe('user');
+    // The repair rewrote this message's string content into blocks, and
+    // importMessages split the synthetic tool_result into a record of its own.
+    expect(JSON.stringify(parent.message.content)).toContain('review @b.js');
+    expect(records[idx].parentUuid).toBe(parent.uuid);
+  });
+
+  test('an attachment on a message the repair dropped is not emitted', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.importMessages(
+      [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+        // orphan tool_result with no preceding tool_use — dropped entirely
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'nope', content: 'x' }] },
+      ],
+      { attachments: [{ afterIndex: 2, attachment: att('/c.js') }] },
+    );
+    expect(session.attachments).toHaveLength(0);
+  });
+});

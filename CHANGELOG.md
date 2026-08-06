@@ -22,6 +22,11 @@
   the base fields and stamping those on would produce records Claude Code never
   writes. It overwrites `sessionId` and rejects a dangling `parentUuid`, which is
   the failure that otherwise resumes with empty context and answers from nothing.
+- `importMessages(messages, { attachments })` places attachments while writing,
+  keyed to indices in the caller's own array. Because attachments sit in the uuid
+  chain they cannot be appended after the fact, and the repair inserts and drops
+  messages, so `repairWithOrigin()` (also exported) reports which input index each
+  repaired message came from and the import maps positions through it.
 - README gains a Scope section stating what the library reads and writes, what
   it preserves without being able to author, and what it does not handle.
 
