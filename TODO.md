@@ -40,9 +40,9 @@ consumer cannot regenerate; the rest Claude Code rewrites every turn.
 
 1. ~~**A typed view.**~~ Done in 0.4.0: `AttachmentRecord` and `session.attachments`.
 2. ~~**Append with id rewriting.**~~ Done in 0.4.0: `session.addAttachment()`.
-3. **Decide what `importMessages` should do with them.** Today they are invisible to
-   it. They are not messages, so folding them into the `Message[]` shape is probably
-   wrong; a separate path is likely cleaner.
+3. ~~**Decide what `importMessages` should do with them.**~~ Done in 0.4.0: a separate
+   `attachments: ImportAttachment[]` option on `importMessages`, positioned by caller
+   array index and mapped through the repair via `repairWithOrigin`.
 
 ### Why
 

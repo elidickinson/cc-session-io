@@ -102,9 +102,9 @@ export interface AssistantRecord extends BaseRecordFields {
  * and `edited_text_file` carry content a consumer cannot regenerate, and the
  * rest Claude Code rewrites every turn.
  *
- * An attachment hangs off the message that caused it via `parentUuid` and is
- * not part of the message chain itself, so it never becomes the parent of the
- * record that follows.
+ * An attachment is a link in the uuid chain, not a leaf hanging off it: it
+ * parents to the record that came before, and the record that follows parents
+ * to the attachment.
  */
 export interface AttachmentRecord extends BaseRecordFields {
   type: 'attachment';
@@ -131,7 +131,7 @@ export interface ToolCallSpec {
  * An attachment to emit while importing, positioned after the message at
  * `afterIndex` in the array handed to `importMessages`. If the repair drops that
  * message the attachment is not emitted, so check `session.attachments` when it
- * matters.
+ * matters. An out-of-range index logs a warning and is not emitted.
  */
 export interface ImportAttachment {
   afterIndex: number;

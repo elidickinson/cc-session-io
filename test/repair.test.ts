@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { repairToolPairing } from '../src/repair.js';
+import { repairToolPairing, repairWithOrigin } from '../src/repair.js';
 
 describe('repairToolPairing', () => {
   test('leaves well-formed history semantically equivalent', () => {
@@ -95,6 +95,31 @@ describe('repairToolPairing', () => {
     expect(out[1].role).toBe('user');
     expect((out[1].content as any[])[0].tool_use_id).toBe('t1');
     expect(out[2].role).toBe('assistant');
+  });
+
+  test('repairWithOrigin: null marks a synthesized message', () => {
+    // The assistant's tool_use has no matching result, so the repair appends a
+    // synthetic tool_result message — the only output with a null origin.
+    const input = [
+      { role: 'user' as const, content: 'go' },
+      { role: 'assistant' as const, content: [{ type: 'tool_use' as const, id: 't1', name: 'Read', input: {} }] },
+    ];
+    const { messages, origin } = repairWithOrigin(input);
+    expect(messages).toHaveLength(3);
+    expect(origin).toEqual([0, 1, null]);
+    expect((messages[2].content as any[])[0].tool_use_id).toBe('t1');
+    // repairToolPairing stays a pure wrapper
+    expect(repairToolPairing(input)).toEqual(messages);
+  });
+
+  test('repairWithOrigin: a fully dropped input simply has no entry', () => {
+    // Leading orphan tool_result is dropped wholesale; later inputs shift down.
+    const input = [
+      { role: 'user' as const, content: [{ type: 'tool_result' as const, tool_use_id: 'ghost', content: 'x' }] },
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'hi' }] },
+    ];
+    const { origin } = repairWithOrigin(input);
+    expect(origin).toEqual([null, 1]); // placeholder text, then assistant from input 1
   });
 
   test('orphan tool_result after unrelated assistant is stripped', () => {

@@ -28,7 +28,6 @@ that this library neither creates nor manages. See also the [Bun/Node hash
 mismatch](#known-limitation-bunnode-hash-mismatch-for-long-paths) for project paths
 over 200 characters.
 
-
 ## Install
 
 ```
@@ -143,21 +142,25 @@ an empty array, which Anthropic rejects. Returns the record's UUID.
 #### `session.dangerousAppendRecord(record, opts?): void`
 
 Appends a record verbatim. The escape hatch for record types this library does not
-model, and for carrying records from one session into another.
+model, and for carrying records from one session into another — with one
+exception: use `addAttachment` for attachments.
 
 Dangerous because nothing is synthesized or validated beyond `sessionId` and the
 parent link — the shape is whatever you pass, and Claude Code will read it back.
 `sessionId` is overwritten with this session's, since a record claiming another
-session is never what a caller wants. The record is appended verbatim and does not advance the chain — unlike
-`addAttachment`, which does, because Claude Code threads attachments through it.
+session is never what a caller wants. The record is appended verbatim and does
+not advance the chain, so the next message parents to whatever came before it.
+That is right for chain-external records like `queue-operation`, but wrong for
+attachments — Claude Code threads those through the chain, so carry them with
+`addAttachment` instead.
 
 `parentUuid` is the one thing checked: a dangling parent makes Claude Code resume
 with **empty context** and answer confidently from nothing, and it does not
 announce itself, so it throws instead.
 
 ```typescript
-// Carry an attachment from a previous session onto its rebuilt message
-target.dangerousAppendRecord(previous.attachments[0], { parentUuid: newMessageUuid });
+// Append a record type this library does not model
+target.dangerousAppendRecord(queueOperationRecord, { parentUuid: lastMessageUuid });
 ```
 
 #### `session.addAttachment(attachment, opts?): string`
@@ -187,7 +190,8 @@ session.importMessages(messages, {
 `afterIndex` indexes the array you passed. `repairToolPairing` runs inside the
 import and can insert or drop messages, so positions are mapped through the
 exported `repairWithOrigin()`. An attachment whose message the repair dropped is
-not emitted, so check `session.attachments` when it matters.
+not emitted, nor is one with an out-of-range index (which logs a warning), so
+check `session.attachments` when it matters.
 
 ```typescript
 const userUuid = session.addUserMessage('review @build.js');

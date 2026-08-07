@@ -86,11 +86,12 @@ export class Session {
     this._fileExists = opts.fileExists ?? false;
     this._nextTimestamp = Date.now();
 
-    // Find the last uuid in the chain for appending
+    // Find the last uuid in the chain for appending. Attachments are links in
+    // the chain, so one at the tail is the next record's parent.
     for (let i = this._records.length - 1; i >= 0; i--) {
       const r = this._records[i];
-      if (r.type === 'user' || r.type === 'assistant') {
-        this._lastUuid = (r as UserRecord | AssistantRecord).uuid;
+      if (r.type === 'user' || r.type === 'assistant' || r.type === 'attachment') {
+        this._lastUuid = (r as UserRecord | AssistantRecord | AttachmentRecord).uuid;
         break;
       }
     }
@@ -163,6 +164,10 @@ export class Session {
    * The one guard is on `parentUuid`, because that is the failure that does not
    * announce itself: a dangling parent makes Claude Code resume with empty
    * context and answer confidently from nothing.
+   *
+   * Carrying an *attachment* into another session should use `addAttachment`
+   * instead: this method does not advance the chain, so an attachment appended
+   * through it becomes a leaf the next message skips over.
    */
   dangerousAppendRecord(record: JsonlRecord, opts?: { parentUuid?: string | null }): void {
     const parentUuid = opts?.parentUuid !== undefined
@@ -311,6 +316,13 @@ export class Session {
     // own indices; the repair can insert and drop messages, so `origin` maps back.
     const following = new Map<number, ImportAttachment[]>();
     for (const a of opts?.attachments ?? []) {
+      if (a.afterIndex < 0 || a.afterIndex >= messages.length) {
+        console.warn(
+          `importMessages: attachment afterIndex ${a.afterIndex} is out of range ` +
+          `(${messages.length} messages); not emitted`,
+        );
+        continue;
+      }
       const list = following.get(a.afterIndex);
       if (list) list.push(a);
       else following.set(a.afterIndex, [a]);

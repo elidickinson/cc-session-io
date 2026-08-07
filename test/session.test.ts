@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, rmSync, readFileSync, realpathSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -561,6 +561,14 @@ describe('attachments', () => {
     expect(session.messages).toHaveLength(1);
   });
 
+  test('rejects a dangling explicit parentUuid', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('hello');
+    expect(() =>
+      session.addAttachment(fileAttachment, { parentUuid: '00000000-0000-0000-0000-000000000000' })
+    ).toThrow(/not a record in this session/);
+  });
+
   test('survives a save and re-read', () => {
     const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
     session.addUserMessage('review @build.js');
@@ -570,6 +578,21 @@ describe('attachments', () => {
     const reread = readSession(session.jsonlPath, '/tmp/test-project');
     expect(reread.attachments).toHaveLength(1);
     expect(reread.attachments[0].attachment).toEqual(fileAttachment);
+  });
+
+  test('stays in the chain across a save, re-read, and append', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('review @build.js');
+    session.addAttachment(fileAttachment);
+    session.save();
+
+    const reread = readSession(session.jsonlPath, '/tmp/test-project');
+    const attachmentUuid = reread.attachments[0].uuid;
+    const nextUuid = reread.addUserMessage('thanks');
+    const next = reread.messages.find(m => m.uuid === nextUuid)!;
+    // The chain continues from the attachment, not the message before it —
+    // appending to a session that ends with an attachment must not skip it.
+    expect(next.parentUuid).toBe(attachmentUuid);
   });
 });
 
@@ -590,7 +613,29 @@ describe('dangerousAppendRecord', () => {
     expect(queued.sessionId).toBe(session.sessionId);
   });
 
-  test('rehomes a record from another session', () => {
+  test('rehomes a record from another session without joining the chain', () => {
+    const source = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    source.addUserMessage('original');
+    const carried = {
+      type: 'queue-operation',
+      operation: { kind: 'enqueue', value: 42 },
+      sessionId: source.sessionId,
+      uuid: '11111111-1111-1111-1111-111111111111',
+    };
+
+    const target = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    const newParent = target.addUserMessage('rebuilt');
+    target.dangerousAppendRecord(carried as any, { parentUuid: newParent });
+
+    const moved = target.records[target.records.length - 1] as any;
+    expect(moved.type).toBe('queue-operation');
+    expect(moved.operation).toEqual({ kind: 'enqueue', value: 42 });
+    expect(moved.sessionId).toBe(target.sessionId);
+    expect(moved.parentUuid).toBe(newParent);
+    expect(moved.sessionId).not.toBe(source.sessionId);
+  });
+
+  test('an attachment rehomed via addAttachment stays in the chain', () => {
     const source = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
     source.addUserMessage('original');
     source.addAttachment({ type: 'file', filename: '/a.js' });
@@ -598,13 +643,15 @@ describe('dangerousAppendRecord', () => {
 
     const target = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
     const newParent = target.addUserMessage('rebuilt');
-    target.dangerousAppendRecord(carried, { parentUuid: newParent });
+    const attachmentUuid = target.addAttachment(carried.attachment, { parentUuid: newParent });
+    const nextUuid = target.addAssistantMessage([{ type: 'text', text: 'ok' }]);
 
-    const moved = target.attachments[0];
-    expect(moved.attachment).toEqual({ type: 'file', filename: '/a.js' });
-    expect(moved.sessionId).toBe(target.sessionId);
-    expect(moved.parentUuid).toBe(newParent);
-    expect(moved.sessionId).not.toBe(source.sessionId);
+    const attachment = target.attachments[0];
+    expect(attachment.uuid).toBe(attachmentUuid);
+    expect(attachment.parentUuid).toBe(newParent);
+    expect(attachment.sessionId).toBe(target.sessionId);
+    const next = target.messages.find(m => m.uuid === nextUuid)!;
+    expect(next.parentUuid).toBe(attachmentUuid);
   });
 
   test('refuses a dangling parentUuid', () => {
@@ -666,6 +713,38 @@ describe('importMessages with attachments', () => {
     // importMessages split the synthetic tool_result into a record of its own.
     expect(JSON.stringify(parent.message.content)).toContain('review @b.js');
     expect(records[idx].parentUuid).toBe(parent.uuid);
+  });
+
+  test('emits multiple attachments at the same index in order', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.importMessages(
+      [
+        { role: 'user', content: 'review @a.js and @b.js' },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      ],
+      { attachments: [
+        { afterIndex: 0, attachment: att('/a.js') },
+        { afterIndex: 0, attachment: att('/b.js') },
+      ] },
+    );
+    const [a, b] = session.attachments;
+    expect(session.attachments).toHaveLength(2);
+    expect(a.attachment.filename).toBe('/a.js');
+    expect(b.attachment.filename).toBe('/b.js');
+    // Second chains off the first, both between user and assistant.
+    expect(b.parentUuid).toBe(a.uuid);
+  });
+
+  test('an out-of-range afterIndex warns and is not emitted', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.importMessages(
+      [{ role: 'user', content: 'hi' }],
+      { attachments: [{ afterIndex: 7, attachment: att('/nope.js') }] },
+    );
+    expect(session.attachments).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('afterIndex 7'));
+    warn.mockRestore();
   });
 
   test('an attachment on a message the repair dropped is not emitted', () => {
