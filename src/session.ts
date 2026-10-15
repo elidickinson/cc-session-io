@@ -252,7 +252,14 @@ export class Session {
     return base.uuid;
   }
 
-  /** Add a user message containing tool results. Returns its uuid. */
+  /**
+   * Add a user message containing tool results. Returns its uuid.
+   *
+   * Blocks are written in the key order Claude Code writes them: a result as
+   * `tool_use_id, type, content`, an error as `type, content, is_error,
+   * tool_use_id`. Key order is part of the serialized prompt, so a session
+   * written in another order misses the prompt cache from its first tool result.
+   */
   addToolResults(
     results: { toolUseId: string; content: string | ContentBlock[]; isError?: boolean }[],
   ): string {
@@ -262,12 +269,9 @@ export class Session {
       ...base,
       message: {
         role: 'user',
-        content: results.map(r => ({
-          type: 'tool_result' as const,
-          tool_use_id: r.toolUseId,
-          content: r.content,
-          ...(r.isError ? { is_error: true } : {}),
-        })),
+        content: results.map(r => r.isError
+          ? { type: 'tool_result' as const, content: r.content, is_error: true, tool_use_id: r.toolUseId }
+          : { tool_use_id: r.toolUseId, type: 'tool_result' as const, content: r.content }),
       },
     };
     this._pendingRecords.push(record);
