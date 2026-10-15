@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `addToolResults` (and so `importMessages`) writes tool_result blocks in the
+  key order Claude Code writes them: a result as `tool_use_id, type, content`,
+  an error as `type, content, is_error, tool_use_id`. Key order is part of the
+  serialized prompt, so a session written in the old order
+  (`type, tool_use_id, content, is_error`) missed the prompt cache from its first
+  tool result. Measured on Claude Code-written records (3,620 results, 116
+  errors), in pi-claude-bridge's rebuild probe: with the old order the rebuilt
+  request diverged at the first tool result; with Claude Code's order it repeats
+  the cached prefix whole.
+
 ## 0.4.0
 
 - Attachment record support. Claude Code writes its injected context — an

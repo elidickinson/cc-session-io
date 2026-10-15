@@ -134,6 +134,33 @@ describe('tool calls', () => {
     ]);
   });
 
+  test('addToolResults writes the key order Claude Code writes', () => {
+    // Key order is part of the serialized prompt, so of the prompt cache key.
+    // Claude Code writes a result as tool_use_id, type, content and an error as
+    // type, content, is_error, tool_use_id.
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.addAssistantMessage([
+      { type: 'tool_use', id: 'toolu_ok', name: 'Read', input: {} },
+      { type: 'tool_use', id: 'toolu_err', name: 'Read', input: {} },
+    ]);
+    session.addToolResults([
+      { toolUseId: 'toolu_ok', content: [{ type: 'text', text: 'ok' }] },
+      { toolUseId: 'toolu_err', content: 'boom', isError: true },
+    ]);
+    session.save();
+
+    const written = readFileSync(session.jsonlPath, 'utf-8').trim().split('\n').map(l => JSON.parse(l));
+    const blocks = (written[1] as UserRecord).message.content as Record<string, unknown>[];
+    expect(blocks.map(b => Object.keys(b))).toEqual([
+      ['tool_use_id', 'type', 'content'],
+      ['type', 'content', 'is_error', 'tool_use_id'],
+    ]);
+  });
+
   test('addToolCalls creates full round-trip', () => {
     const session = createSession({
       projectPath: '/tmp/test-project',
