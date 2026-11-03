@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+- Fix imports ending in the future. Timestamps advanced 1 ms per record from
+  the current time, so a large import's tail landed seconds ahead, and Claude
+  Code treats a future tail as fresh (#4). Imports are now backdated to end at
+  the current time.
+- New records are always stamped after the latest message in the session,
+  including ones read from disk or appended verbatim. Claude Code resumes from
+  the latest-stamped message, so anything stamped before it is lost on resume.
+
 ## 0.4.0
 
 - Attachment record support. Claude Code writes its injected context — an

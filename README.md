@@ -158,6 +158,11 @@ attachments — Claude Code threads those through the chain, so carry them with
 with **empty context** and answer confidently from nothing, and it does not
 announce itself, so it throws instead.
 
+The record's `timestamp` is kept as is. If Claude Code could resume from it (a
+user, assistant, attachment, or system record), later records are stamped after
+it, even if that puts them in the future, because Claude Code resumes from the
+latest-stamped one.
+
 ```typescript
 // Append a record type this library does not model
 target.dangerousAppendRecord(queueOperationRecord, { parentUuid: lastMessageUuid });
@@ -270,9 +275,11 @@ session.addToolCalls([
 | `result` | `string \| ContentBlock[]` | Tool output |
 | `isError` | `boolean?` | Whether the tool call errored |
 
-#### `session.importMessages(messages): void`
+#### `session.importMessages(messages, opts?): void`
 
-Bulk import an array of Anthropic API-shaped messages. Dispatches each to the right internal method based on role and content type. Useful when replaying API responses or syncing from another provider.
+Bulk import an array of Anthropic API-shaped messages. Dispatches each to the right internal method based on role and content type. Useful when replaying API responses or syncing from another provider. `opts.attachments` places attachments within the import; see `addAttachment`.
+
+Timestamps are backdated so the last record lands at the current time, since Claude Code treats a tail stamped in the future as fresh. They never go at or before a record already in the session, because Claude Code resumes from the latest-stamped one. So importing thousands of messages right after other writes, including an earlier import, still ends in the future: import in one call.
 
 ```typescript
 session.importMessages([

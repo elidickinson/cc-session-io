@@ -60,7 +60,9 @@ export class Session {
   private _gitBranch: string;
   private _model: string;
   private _fileExists: boolean;
-  private _nextTimestamp: number;
+  /** Epoch ms of the latest record Claude Code could resume from. It resumes
+   *  from the one stamped latest, so every new record must come after it. */
+  private _latestTimestamp: number;
 
   constructor(opts: {
     sessionId: string;
@@ -84,7 +86,7 @@ export class Session {
     this._model = opts.model ?? 'claude-sonnet-4-6';
     this._records = opts.records ?? [];
     this._fileExists = opts.fileExists ?? false;
-    this._nextTimestamp = Date.now();
+    this._latestTimestamp = this._records.reduce((t, r) => Math.max(t, resumeTimestamp(r)), -Infinity);
 
     // Find the last uuid in the chain for appending. Attachments are links in
     // the chain, so one at the tail is the next record's parent.
@@ -115,13 +117,20 @@ export class Session {
     return this.records.filter((r): r is AttachmentRecord => r.type === 'attachment');
   }
 
+  /** Now, or just after the latest record if that is later. Ties count as
+   *  earlier: Claude Code resumes from the first of two equal timestamps. */
+  private stamp(): string {
+    this._latestTimestamp = Math.max(Date.now(), this._latestTimestamp + 1);
+    return new Date(this._latestTimestamp).toISOString();
+  }
+
   private baseFields(): Omit<UserRecord, 'type' | 'message'> {
     const uuid = randomUUID();
     const record = {
       uuid,
       parentUuid: this._lastUuid,
       sessionId: this.sessionId,
-      timestamp: new Date(this._nextTimestamp++).toISOString(),
+      timestamp: this.stamp(),
       isSidechain: false,
       cwd: this._cwd,
       userType: 'external',
@@ -165,6 +174,10 @@ export class Session {
    * announce itself: a dangling parent makes Claude Code resume with empty
    * context and answer confidently from nothing.
    *
+   * The record's own `timestamp` is kept. If Claude Code could resume from it
+   * (a user, assistant, attachment, or system record), records added after it
+   * are stamped later still, even if that puts them in the future.
+   *
    * Carrying an *attachment* into another session should use `addAttachment`
    * instead: this method does not advance the chain, so an attachment appended
    * through it becomes a leaf the next message skips over.
@@ -187,6 +200,7 @@ export class Session {
       ...(parentUuid !== undefined ? { parentUuid } : {}),
       sessionId: this.sessionId,
     } as JsonlRecord);
+    this._latestTimestamp = Math.max(this._latestTimestamp, resumeTimestamp(record));
   }
 
   /**
@@ -211,7 +225,7 @@ export class Session {
       uuid,
       parentUuid: opts?.parentUuid !== undefined ? opts.parentUuid : this._lastUuid,
       sessionId: this.sessionId,
-      timestamp: new Date(this._nextTimestamp++).toISOString(),
+      timestamp: this.stamp(),
       isSidechain: false,
       cwd: this._cwd,
       userType: 'external',
@@ -327,6 +341,8 @@ export class Session {
       if (list) list.push(a);
       else following.set(a.afterIndex, [a]);
     }
+    const floor = this._latestTimestamp;
+    const first = this._pendingRecords.length;
     for (const [i, msg] of repaired.entries()) {
       if (msg.role === 'assistant') {
         const content = typeof msg.content === 'string'
@@ -364,6 +380,16 @@ export class Session {
         for (const a of following.get(src) ?? []) this.addAttachment(a.attachment);
       }
     }
+    // Stamping as it goes runs a large import seconds into the future, 1 ms per
+    // record, and Claude Code ages the tail with a signed subtraction, so a
+    // future tail always reads as fresh. Restamp so the last record lands at
+    // now, unless that would put the import at or before a record already in
+    // the session, which Claude Code would then resume from instead.
+    const added = this._pendingRecords.slice(first) as BaseRecordFields[];
+    if (added.length === 0) return;
+    let t = Math.max(floor + 1, Date.now() - added.length + 1);
+    for (const r of added) r.timestamp = new Date(t++).toISOString();
+    this._latestTimestamp = t - 1;
   }
 
   /**
@@ -374,7 +400,7 @@ export class Session {
     this._records = [];
     this._pendingRecords = [];
     this._lastUuid = null;
-    this._nextTimestamp = Date.now();
+    this._latestTimestamp = -Infinity;
     this._fileExists = false;
     removeSessionFiles(this.jsonlPath);
   }
@@ -400,6 +426,17 @@ export class Session {
     this._records.push(...this._pendingRecords);
     this._pendingRecords = [];
   }
+}
+
+const TRANSCRIPT_TYPES = new Set(['user', 'assistant', 'attachment', 'system']);
+
+/** The epoch ms Claude Code compares when choosing where to resume, or
+ *  -Infinity for a record it never resumes from: it considers only transcript
+ *  types, and a timestamp that does not parse never wins. */
+function resumeTimestamp(record: JsonlRecord): number {
+  if (!TRANSCRIPT_TYPES.has(record.type)) return -Infinity;
+  const t = Date.parse((record as BaseRecordFields).timestamp);
+  return Number.isNaN(t) ? -Infinity : t;
 }
 
 /**

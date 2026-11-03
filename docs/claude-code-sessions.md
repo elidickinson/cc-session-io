@@ -96,11 +96,12 @@ The resume path (`loadTranscriptFile()` → `buildConversationChain()` → `remo
 - `type` — must be one of `user`, `assistant`, `attachment`, or `system`
 - `uuid` — used as map key and for parent-child linking
 - `parentUuid` — for chain walking (null is valid for first message)
+- `timestamp` — chooses where a resume starts: `--resume <id>` builds the chain backward from the non-sidechain message with the latest timestamp (the first in the file on a tie; one that does not parse never wins), so anything after it is dropped
 
 **Message display** (what's needed to be useful):
 - `message` — the actual content payload
 
-**All other fields** (`timestamp`, `sessionId`, `cwd`, `version`, `isSidechain`, etc.) are accessed downstream but the code degrades gracefully. Missing boolean fields default to falsy due to JavaScript's `undefined` semantics.
+**All other fields** (`sessionId`, `cwd`, `version`, `isSidechain`, etc.) are accessed downstream but the code degrades gracefully. Missing boolean fields default to falsy due to JavaScript's `undefined` semantics.
 
 Synthetic sessions with `type`, `uuid`, `parentUuid`, `sessionId`, `timestamp`, `message` resume successfully. Fallback values are provided for missing metadata fields (e.g., `firstPrompt` defaults to "(session)").
 

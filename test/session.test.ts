@@ -2,10 +2,10 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, rmSync, readFileSync, realpathSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createSession, openSession, readSession, deleteSession } from '../src/session.js';
+import { createSession, openSession, readSession, deleteSession, type Session } from '../src/session.js';
 import { getProjectDir } from '../src/paths.js';
 import { parseJsonl } from '../src/jsonl.js';
-import type { UserRecord, AssistantRecord } from '../src/types.js';
+import type { UserRecord, AssistantRecord, Message } from '../src/types.js';
 
 let tempDir: string;
 
@@ -208,6 +208,30 @@ describe('openSession + append', () => {
     expect((final.messages[2] as UserRecord).message.content).toBe('second');
     expect(final.messages[2].parentUuid).toBe(final.messages[1].uuid);
   });
+
+  // Claude Code resumes from the latest-stamped message, so an append stamped
+  // before an existing record would be dropped on resume.
+  test('appends after a record stamped in the future, before and after reopening', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+    session.addUserMessage('first');
+    const future = new Date(Date.now() + 60_000).toISOString();
+    session.dangerousAppendRecord({ ...session.messages[0], uuid: 'future', timestamp: future });
+    session.addUserMessage('second');
+    session.save();
+
+    const reopened = openSession({
+      sessionId: session.sessionId,
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+    reopened.addUserMessage('third');
+
+    const ts = timestamps(reopened);
+    expect(ts.every((t, i) => i === 0 || t > ts[i - 1])).toBe(true);
+  });
 });
 
 describe('importMessages', () => {
@@ -372,7 +396,56 @@ describe('importMessages', () => {
     const asst = session.messages[0] as AssistantRecord;
     expect(asst.message.content).toEqual([{ type: 'text', text: 'plain text response' }]);
   });
+
+  // Claude Code ages the tail with a signed subtraction, so a tail stamped in
+  // the future always reads as fresh.
+  test('a large import does not end in the future', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.importMessages([]); // must not raise the bar for the next import
+    session.importMessages(alternating(5000));
+
+    const ts = timestamps(session);
+    expect(ts.at(-1)!).toBeLessThanOrEqual(Date.now());
+    expect(ts.every((t, i) => i === 0 || t > ts[i - 1])).toBe(true);
+
+    // Nor does the next write: at most 1 ms ahead, if it lands in the tail's millisecond.
+    session.addUserMessage('next');
+    expect(timestamps(session).at(-1)!).toBeLessThanOrEqual(Date.now() + 1);
+  });
+
+  // Claude Code resumes from the latest-stamped message, so an import stamped
+  // at or before an existing one would be dropped on resume.
+  test('backdated imports still follow the latest record in the session', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+
+    session.addUserMessage('first');
+    // An older record appended last must not lower the bar.
+    session.dangerousAppendRecord(
+      { type: 'queue-operation', operation: 'enqueue', timestamp: '2020-01-01T00:00:00.000Z' } as any,
+    );
+    session.importMessages(alternating(1000));
+
+    const ts = timestamps(session);
+    expect(ts.every((t, i) => i === 0 || t > ts[i - 1])).toBe(true);
+  });
 });
+
+function alternating(n: number): Message[] {
+  return Array.from({ length: n }, (_, i) => (
+    { role: i % 2 ? 'assistant' : 'user', content: `message ${i}` }
+  ));
+}
+
+function timestamps(session: Session): number[] {
+  return session.messages.map(m => Date.parse(m.timestamp));
+}
 
 describe('readSession', () => {
   test('reads fixture file preserving all record types', () => {
@@ -597,6 +670,18 @@ describe('attachments', () => {
 });
 
 describe('dangerousAppendRecord', () => {
+  test('ignores timestamps Claude Code never resumes from', () => {
+    const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
+    session.addUserMessage('first');
+    const future = new Date(Date.now() + 60_000).toISOString();
+    session.dangerousAppendRecord({ type: 'queue-operation', operation: 'enqueue', timestamp: future } as any);
+    session.dangerousAppendRecord({ ...session.messages[0], uuid: 'unparseable', timestamp: null } as any);
+
+    session.addUserMessage('second');
+
+    expect(Date.parse(session.messages.at(-1)!.timestamp)).toBeLessThan(Date.parse(future));
+  });
+
   test('appends verbatim, keeping fields the library does not model', () => {
     const session = createSession({ projectPath: '/tmp/test-project', claudeDir: tempDir });
     const userUuid = session.addUserMessage('hello');
