@@ -288,6 +288,19 @@ export class Session {
     return base.uuid;
   }
 
+  /** Add a user message of tool_result blocks, written exactly as given — key
+   *  order included, which a prompt-cache match depends on. Returns its uuid. */
+  addToolResultBlocks(blocks: ToolResultBlock[]): string {
+    const base = this.baseFields();
+    const record: UserRecord = {
+      type: 'user',
+      ...base,
+      message: { role: 'user', content: blocks },
+    };
+    this._pendingRecords.push(record);
+    return base.uuid;
+  }
+
   /**
    * Convenience: add a complete tool call round-trip.
    * Creates assistant tool_use message, user tool_result message,

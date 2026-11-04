@@ -245,6 +245,17 @@ session.addToolResults([
 ]);
 ```
 
+#### `session.addToolResultBlocks(blocks): string`
+
+Adds a user message of `tool_result` blocks, written exactly as you pass them. When rewriting a session Claude Code will resume, use this instead of `addToolResults` to keep the prompt cache. `addToolResults` builds each block itself and puts the fields in a different order than Claude Code does, so the request no longer matches what was cached. Returns the record's UUID.
+
+```typescript
+// Field order as Claude Code wrote it
+session.addToolResultBlocks([
+  { tool_use_id: 'toolu_abc', type: 'tool_result', content: 'file contents here' },
+]);
+```
+
 #### `session.addToolCalls(calls, opts?): void`
 
 Convenience method that creates the full tool call round-trip: assistant `tool_use` message, user `tool_result` message, and optionally a final assistant response.

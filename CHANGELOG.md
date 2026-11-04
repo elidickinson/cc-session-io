@@ -9,6 +9,11 @@
 - New records are always stamped after the latest message in the session,
   including ones read from disk or appended verbatim. Claude Code resumes from
   the latest-stamped message, so anything stamped before it is lost on resume.
+- Add `session.addToolResultBlocks(blocks)`, which writes `tool_result` blocks
+  unchanged. When rewriting a session Claude Code will resume, use it instead of
+  `addToolResults` to keep the prompt cache: `addToolResults` puts the fields in
+  a different order than Claude Code does, so the request no longer matches what
+  was cached.
 
 ## 0.4.0
 

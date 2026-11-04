@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createSession, openSession, readSession, deleteSession, type Session } from '../src/session.js';
 import { getProjectDir } from '../src/paths.js';
 import { parseJsonl } from '../src/jsonl.js';
-import type { UserRecord, AssistantRecord, Message } from '../src/types.js';
+import type { UserRecord, AssistantRecord, Message, ToolResultBlock } from '../src/types.js';
 
 let tempDir: string;
 
@@ -132,6 +132,25 @@ describe('tool calls', () => {
     expect(toolResult.message.content).toEqual([
       { type: 'tool_result', tool_use_id: 'toolu_abc', content: 'file contents' },
     ]);
+  });
+
+  // Claude Code's own key order differs from addToolResults', and a prompt-cache
+  // match needs the request bytes to be identical.
+  test('addToolResultBlocks writes blocks byte-for-byte, key order included', () => {
+    const session = createSession({
+      projectPath: '/tmp/test-project',
+      claudeDir: tempDir,
+    });
+    const blocks = [
+      { tool_use_id: 'toolu_ok', type: 'tool_result', content: 'ok' },
+      { type: 'tool_result', content: 'boom', is_error: true, tool_use_id: 'toolu_err' },
+    ] as ToolResultBlock[];
+
+    session.addToolResultBlocks(blocks);
+    session.save();
+
+    const line = readFileSync(session.jsonlPath, 'utf-8').trim();
+    expect(line).toContain(`"content":${JSON.stringify(blocks)}`);
   });
 
   test('addToolCalls creates full round-trip', () => {
