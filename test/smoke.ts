@@ -2,18 +2,25 @@
  * Smoke test: creates a synthetic CC session, resumes it with `claude -p`,
  * and verifies Claude can see the conversation history.
  *
- * Run: npx tsx test/smoke.ts
+ * The session is written to a temp dir and resumed by path, with persistence
+ * off and customizations disabled, so nothing lands in ~/.claude and your
+ * hooks, plugins, and CLAUDE.md stay out of it. Makes one real API call.
+ *
+ * Run: npm run smoke
  */
 
-import { execSync } from 'node:child_process';
-import { unlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createSession } from '../src/session.js';
 
 const MARKER = 'SMOKE_TEST_UNIQUE_PHRASE_XK9Q2';
+const claudeDir = mkdtempSync(join(tmpdir(), 'cc-session-smoke-'));
 
 const session = createSession({
   projectPath: process.cwd(),
-  cwd: process.cwd(),
+  claudeDir,
   gitBranch: 'HEAD',
 });
 
@@ -41,10 +48,11 @@ console.log();
 
 try {
   console.log('Resuming with claude -p ...');
-  const output = execSync(
-    `claude -p --resume "${session.sessionId}" "What was the unique phrase from our conversation?"`,
-    { encoding: 'utf-8', timeout: 30_000 },
-  ).trim();
+  const output = execFileSync('claude', [
+    '-p', '--safe-mode', '--no-session-persistence',
+    '--resume', session.jsonlPath,
+    'What was the unique phrase from our conversation?',
+  ], { encoding: 'utf-8', timeout: 60_000 }).trim();
 
   console.log(`Claude responded: ${output.slice(0, 200)}`);
   console.log();
@@ -61,6 +69,5 @@ try {
   console.error(err.stderr || err.message);
   process.exitCode = 1;
 } finally {
-  unlinkSync(session.jsonlPath);
-  console.log('Cleaned up JSONL file.');
+  rmSync(claudeDir, { recursive: true, force: true });
 }

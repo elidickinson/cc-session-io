@@ -37,6 +37,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "npx tsx test/smoke.ts",
+    "smoke:cli": "npx tsx test/cli-smoke.ts",
     "cli": "npx tsx src/cli.ts"
   },
   "devDependencies": {

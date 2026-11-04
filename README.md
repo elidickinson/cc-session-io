@@ -413,6 +413,9 @@ Everything else (`cwd`, `version`, `isSidechain`, `slug`, `entrypoint`, `gitBran
 ## Testing
 
 ```
-npm test          # unit + integration tests
-npm run smoke     # end-to-end: creates a session, resumes with claude CLI
+npm test            # unit + integration tests
+npm run smoke:cli   # drives the cc-session CLI end to end
+npm run smoke       # creates a session, resumes it with the claude CLI (one API call)
 ```
+
+All of them write to temp dirs and clean up; nothing touches `~/.claude`. `smoke` needs `claude` on your PATH and logged in, and runs it with `--safe-mode` so your hooks, plugins, and CLAUDE.md stay out of it.
