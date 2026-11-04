@@ -5,11 +5,13 @@ import {
   getProjectDir as getProjectDirPath,
   getSessionPath as getSessionPathFull,
 } from './paths.js';
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-const VERSION = '0.1.0';
+const VERSION: string = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+).version;
 
 function resolvePath(path: string): string {
   if (path.startsWith('~')) {
